@@ -1,0 +1,36 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "aihist"
+dynamic = ["version"]
+description = "Turn notebook dialogs into LLM input, and chats into dialog text and back"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "Apache-2.0"}
+authors = [{name = "Jeremy Howard", email = "github@jhoward.fastmail.fm"}]
+classifiers = ["Programming Language :: Rust", "Programming Language :: Python :: Implementation :: CPython"]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["fastship>=0.0.11", "maturin>=1.0,<2.0", "pytest"]
+
+[project.urls]
+Homepage = "https://github.com/AnswerDotAI/aihist"
+Repository = "https://github.com/AnswerDotAI/aihist"
+Issues = "https://github.com/AnswerDotAI/aihist/issues"
+
+[tool.fastship]
+branch = "main"
+
+[tool.maturin]
+manifest-path = "py/Cargo.toml"
+python-source = "python"
+module-name = "aihist._core"
+
+[tool.uv]
+cache-keys = [{ file = "pyproject.toml" }, { file = "Cargo.toml" }, { file = "py/Cargo.toml" }]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

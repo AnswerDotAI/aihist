@@ -1,0 +1,46 @@
+[workspace]
+members = ["py"]
+default-members = [".", "py"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+
+[package]
+name = "aihist"
+version.workspace = true
+edition.workspace = true
+license = "Apache-2.0"
+description = "Turn notebook dialogs into LLM input, and chats into dialog text and back"
+repository = "https://github.com/AnswerDotAI/aihist"
+
+[lib]
+name = "aihist"
+
+[dependencies]
+
+[profile.test]
+inherits = "release"
+
+[profile.release]
+lto = false
+codegen-units = 16
+
+[profile.release.package.aihist]
+incremental = true
+
+[profile.release.package.aihist-py]
+incremental = true
+
+[profile.dist]
+inherits = "release"
+lto = true
+incremental = false
+codegen-units = 1
+strip = true
+
+[profile.dist.package.aihist]
+incremental = false
+
+[profile.dist.package.aihist-py]
+incremental = false
