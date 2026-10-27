@@ -11,6 +11,9 @@ test = false
 [dependencies]
 aihist = { path = ".." }
 pyo3 = { version = ">=0.29", features = ["extension-module"] }
+rgapi = "0.2.0"
+serde = "1"
+serde_json = { version = "1", features = ["preserve_order"] }
 
 [build-dependencies]
 pyo3-build-config = ">=0.29"
