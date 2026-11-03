@@ -1,6 +1,6 @@
 "aihist turns dialogs into model history, chat messages and Markdown documents, chat messages back into dialogs, and one message into its XML and media"
 import base64, json
-from aidialog.dialog import Dialog, Message, Attachment, prompt_output, code_output
+from aidialog.dialog import Dialog, Message, Attachment, prompt_output, code_output, displayobj
 from aidialog.msg_parts import Msg, Text, ToolUse, ToolResult, hist2fmt
 from aihist import (build, dlg2hist, dlg2chat, chat2dlg, reply2dlg, dlg2reply, tool_call, hist_xml, to_parts, to_media, media_item, resize_img,
     pdf_pages, output_parts, merge_media, vars_hist, is_nameerr, get_exprs, get_refs, task_tags, warning_tag, msg2md, dlg2md)
@@ -12,7 +12,7 @@ def tool(tid, code, res): return f"```json {{.tool}}\n{json.dumps(dict(id=tid, n
 def test_history():
     d = Dialog(name='h')
     d.mk_message('a note', msg_type='note')
-    d.mk_message('x = 1', output=code_output('1'))
+    d.mk_message('x = 1', output=[displayobj('1', 'markdown')])
     d.mk_message('What is x?', msg_type='prompt', output=prompt_output('x is 1.'))
     d.mk_message('And $`x`?', msg_type='prompt')
     # Notes and code before a prompt join its user turn, and each prompt is followed by its reply, pending when it has none.

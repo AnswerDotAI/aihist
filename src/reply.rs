@@ -312,7 +312,7 @@ pub fn write(parts: &[Part], usage: Option<&Usage>) -> String {
 /// A prompt cell's outputs holding `reply`, as aidialog's `prompt_output` makes them: none for an empty reply
 pub fn output(reply: &str) -> Vec<Value> {
     if reply.is_empty() { return vec![] }
-    vec![json!({"output_type": "display_data", "metadata": {"is_ai_res": true}, "data": {"text/markdown": reply}})]
+    vec![json!({"output_type": "display_data", "metadata": {}, "data": {"text/markdown": reply}})]
 }
 
 /// The `json {.tool}` block for call `c` with `args` and result `text`, as aidialog's `mk_tr_details` writes it

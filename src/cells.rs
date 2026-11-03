@@ -63,7 +63,7 @@ pub struct Msg {
 }
 
 /// `cell` as a dialog message. A prompt is a code cell with `solveit_ai` metadata, a `%%prompt` first line and its
-/// reply in an `is_ai_res` output.
+/// reply in a Markdown output.
 pub fn msg(cell: &Value) -> Msg {
     let src = content(cell);
     let outs = cell["outputs"].as_array().map(Vec::as_slice).unwrap_or_default();
@@ -73,7 +73,7 @@ pub fn msg(cell: &Value) -> Msg {
         let out = if typ != "code" { String::new() } else { output::render(output::stored(outs), false, true).text };
         return Msg { typ, content: src, out };
     }
-    let out = outs.iter().find(|o| truthy(&o["metadata"]["is_ai_res"])).map(|o| text_str(&o["data"]["text/markdown"])).unwrap_or_default();
+    let out = outs.iter().find_map(|o| o.get("data")?.get("text/markdown")).map(text_str).unwrap_or_default();
     Msg { typ: "prompt", content: src, out }
 }
 
