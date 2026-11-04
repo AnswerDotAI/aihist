@@ -59,18 +59,18 @@ fn scaled(n: u64) -> u64 { (n as f64 * ALLOWANCE) as u64 }
 
 /// One message of model input: its content parts and, for a prompt, its stored reply. `cache` ends a stable prefix
 /// after the reply, which a provider can cache.
-struct Entry { parts: Vec<Value>, reply: Option<String>, pinned: bool, tokens: u64, cache: bool }
+struct Entry { parts: Vec<Value>, reply: Option<String>, pinned: bool, tokens: u64, cache: bool, boundary: bool }
 
 impl Entry {
     /// A message of one text part, such as a tag that opens a CRAFT
-    fn text(s: String) -> Entry { Entry { tokens: scaled(tokens::count(&s)), parts: vec![text(s)], reply: None, pinned: true, cache: false } }
+    fn text(s: String) -> Entry { Entry { tokens: scaled(tokens::count(&s)), parts: vec![text(s)], reply: None, pinned: true, cache: false, boundary: false } }
 }
 
 /// Cell `cell` of notebook `nb` as a message. `time` is the cell's time in the user's time zone.
 fn entry(nb: &Value, cell: &Value, caps: &Caps, time: Option<&str>) -> Entry {
     let m = msg(cell);
     let reply = (m.typ == "prompt").then(|| ai_fmt(&m.out));
-    Entry { parts: parts(nb, cell, caps, time), reply, pinned: truthy(&cell["metadata"]["pinned"]), tokens: scaled(tokens::total(cell, stored_atts(nb, cell))), cache: false }
+    Entry { parts: parts(nb, cell, caps, time), reply, pinned: truthy(&cell["metadata"]["pinned"]), tokens: scaled(tokens::total(cell, stored_atts(nb, cell))), cache: false, boundary: false }
 }
 
 /// The messages of every cell in `nb` that the model sees
@@ -121,18 +121,18 @@ pub fn vars(records: &Map<String, Value>, caps: &Caps) -> (Vec<Value>, Vec<Strin
 /// The reply that acknowledges the `$` values
 pub const VARS_REPLY: &str = "Understood, I will use these variable values.";
 
-/// `hist` within `budget` tokens: every pinned message, then the newest others while they fit. Also returns how
-/// many were dropped.
+/// `hist` within `budget` tokens: every pinned message and the newest suffix starting at a chunk boundary.
+/// Also returns how many were dropped.
 fn fit(hist: Vec<Entry>, budget: u64) -> (Vec<Entry>, usize) {
     let mut used: u64 = hist.iter().filter(|e| e.pinned).map(|e| e.tokens).sum();
-    let mut keep: Vec<bool> = hist.iter().map(|e| e.pinned).collect();
-    for (i, e) in hist.iter().enumerate().rev().filter(|(_, e)| !e.pinned) {
-        used += e.tokens;
+    let mut start = hist.len();
+    for (i, e) in hist.iter().enumerate().rev() {
+        if !e.pinned { used += e.tokens }
         if used > budget { break }
-        keep[i] = true;
+        if e.boundary { start = i }
     }
     let n = hist.len();
-    let kept: Vec<Entry> = hist.into_iter().zip(keep).filter_map(|(e, k)| k.then_some(e)).collect();
+    let kept: Vec<Entry> = hist.into_iter().enumerate().filter_map(|(i, e)| (e.pinned || i >= start).then_some(e)).collect();
     let dropped = n - kept.len();
     (kept, dropped)
 }
@@ -173,18 +173,28 @@ pub fn build(p: &Prompt) -> Result<Vec<Value>, String> {
     let (vparts, undef) = vars(&p.vars, caps);
     if !vparts.is_empty() {
         let tokens = vparts.iter().map(|p| p["text"].as_str().map_or(tokens::IMG_TOKENS, |t| scaled(tokens::count(t)))).sum();
-        pre.push(Entry { parts: vparts, reply: Some(VARS_REPLY.into()), pinned: true, tokens, cache: false });
+        pre.push(Entry { parts: vparts, reply: Some(VARS_REPLY.into()), pinned: true, tokens, cache: false, boundary: false });
     }
     if !p.path.is_empty() { pre.push(Entry::text(format!("<dialog{}/>", xml_attr("path", &p.path)))) }
     let time = |c: &Value| p.times.get(c["id"].as_str().unwrap_or_default()).and_then(Value::as_str);
     let mut last: Vec<Entry> = warning(&undef, &p.tool_errors, &p.craft_errors).map(Entry::text).into_iter().collect();
     last.push(entry(&p.nb, &all[at], caps, time(&all[at])));
-    let hist = all[..at].iter().filter(|c| shown(c)).map(|c| entry(&p.nb, c, caps, time(c))).collect();
+    let (mut boundary, mut after_large) = (false, false);
+    let hist = all[..at].iter().enumerate().filter_map(|(i, c)| {
+        let m = msg(c);
+        let large = m.content.chars().count() + m.out.chars().count() > 20_000;
+        boundary |= i % 10 == 0 || large || after_large;
+        after_large = large;
+        if !shown(c) { return None }
+        let e = Entry { boundary, ..entry(&p.nb, c, caps, time(c)) };
+        boundary = false;
+        Some(e)
+    }).collect();
     let fixed: u64 = pre.iter().chain(&last).map(|e| e.tokens).sum::<u64>() + p.instructions.as_deref().map_or(0, |s| scaled(tokens::count(s)));
     let budget = (caps.max_input_tokens.unwrap_or(WINDOW) as f64 * FILL) as u64;
     let (hist, dropped) = fit(hist, budget.saturating_sub(fixed));
     if dropped > 0 {
-        last.insert(0, Entry::text(reminder(&format!("Notify the user if relevant: {dropped} older non-pinned cell(s) were omitted to fit the model context."))));
+        last.insert(0, Entry::text(reminder(&format!("Notify the user if relevant: {dropped} older non-pinned dialog message(s) were omitted to fit the model context."))));
     }
     Ok(turns(pre.into_iter().chain(hist).chain(last).collect()))
 }

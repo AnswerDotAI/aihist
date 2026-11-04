@@ -12,7 +12,7 @@ pip install aihist
 
 ## Model input
 
-`build` gives a prompt's model input as Responses input items: the cells above the prompt cell, each as a model reads it, then the prompt. Each earlier prompt is followed by its saved reply, read back into text, tool calls and tool results. A host can add example notebooks, CRAFT dialogs, `$` values and warnings. The input fits 80% of the model's input window. Pinned cells always stay, and other cells are dropped oldest first.
+`build` gives a prompt's model input as Responses input items: the dialog messages above the prompt, each as a model reads it, then the prompt. Each earlier prompt is followed by its saved reply, read back into text, tool calls and tool results. A host can add example notebooks, CRAFT dialogs, `$` values and warnings. The input fits 80% of the model's input window. Pinned messages always stay. Other messages are dropped oldest first, with cutoffs every ten messages in the original dialog and before and after any message whose input and text output exceed 20,000 characters combined. Pinned and skipped messages count toward those positions.
 
 ```python
 from aidialog.dialog import Dialog

@@ -52,7 +52,23 @@ def test_dialog_cells():
     # A small window keeps the pinned note and the prompt, and tells the model how many cells were dropped.
     small = build(dlg, last_cell(dlg), dict(max_input_tokens=1))
     assert len(small) == 1 and 'Use metres.' in texts(small[0])[0]
-    assert re.search(r'5 older non-pinned cell\(s\) were omitted', texts(small[0])[1])
+    assert re.search(r'5 older non-pinned dialog message\(s\) were omitted', texts(small[0])[1])
+    # Cutoffs use original dialog positions, including pinned/skipped messages, and stay put as the dialog grows.
+    d = Dialog()
+    msgs = [d.mk_message('word '*100, msg_type='note', meta=dict(pinned=i==2, skipped=i==3)) for i in range(31)]
+    p = d.mk_message('Continue', msg_type='prompt')
+    for extra in range(4):
+        if extra: d.mk_message('word '*100, msg_type='note', before=p)
+        sent = json.dumps(build(nb(d), p.id, dict(max_input_tokens=3000)))
+        assert msgs[2].id in sent and msgs[19].id not in sent and msgs[20].id in sent
+    # A large saved reply adds boundaries on both sides without resetting the next ten-message boundary.
+    msgs[14].msg_type,msgs[14].output = 'prompt',prompt_output('word '*5001)
+    sent = json.dumps(build(nb(d), p.id, dict(max_input_tokens=3800)))
+    assert msgs[14].id not in sent and msgs[15].id in sent
+    sent = json.dumps(build(nb(d), p.id, dict(max_input_tokens=12500)))
+    assert msgs[13].id not in sent and msgs[14].id in sent
+    sent = json.dumps(build(nb(d), p.id, dict(max_input_tokens=3000)))
+    assert msgs[19].id not in sent and msgs[20].id in sent
 
 def test_host_context():
     dlg = fixture()
