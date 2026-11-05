@@ -26,6 +26,13 @@ items = build(dlg, p.id, dict(input_modalities=['text', 'image'], max_input_toke
 
 The third argument says what the model reads, as fastllm's `get_model_info` or a model catalog entry gives it. fastllm's `response_input` turns the items into fastllm messages.
 
+
+Markdown embeds such as `![chart](chart.png#ai)` in notes and prompts include linked images, PDFs, audio or video when the model supports them. Unmarked external embeds and saved replies are not expanded. Notebook attachments and code outputs retain their normal media handling. Python loads HTTP(S) URLs, base64 data URLs and ordinary filesystem paths relative to the dialog; absolute paths keep their normal meaning. Rustygate maps `/static/` to its served root and applies its file restrictions. Linked media is not included in the token estimate.
+
+The Rust core loads linked media while building the retained context. Rust hosts pass `media::Context { http, root, path }` to async `input::build`. `path` is the notebook filename; `root` is the gateway's served root, or `None` for ordinary filesystem paths. Python uses the same core through synchronous bindings with a shared I/O runtime. Media paths accept strings or PathLike objects. Neither path changes the notebook.
+
+`references` returns sorted unique vars, commands and tools from the prompt's prefit context. An explicitly addressed prompt contributes even when skipped. The host evaluates variables and supplies tool schemas. `cell_turn` returns one message's canonical parts and normalized saved reply; `input::group_turns` groups these contributions through each reply without fitting or shortening call IDs. `dlg2hist`, `dlg2chat` and `chat2dlg` remain Python APIs for full transcripts, including the final saved reply.
+
 `build` estimates tokens by character class, calibrated against OpenAI's o200k tokenizer, and adds a margin for other providers' tokenizers. `count_tokens` gives the estimate for any text: `count_tokens('def fetch_daily(lat, lon): pass')` is 9.
 
 ## Saved replies
@@ -41,4 +48,6 @@ A saved reply is Markdown, with each tool call and its result in a fenced `json 
 `dlg2chat` turns a dialog into chat messages, with each reply's tool calls as real parts, and `chat2dlg` turns chat messages back into a dialog. `reply2dlg` turns one reply into a dialog of notes and code that calls the tools, which `dlg2reply` turns back into the reply. `hist_xml`, `to_media` and `to_parts` give one message as a model reads it.
 
 `dlg2md` writes a dialog as one Markdown document: notes as they are, code in `python` fences with its outputs in `::: output` divs, and each prompt and its reply in `::: prompt` and `::: reply` divs. `msg2md` writes one message.
+
+`reply2dlg` and `dlg2reply` retain Python code-cell editing and use the native reply parser, output renderer and writer. `dlg2reply` applies the same saved-history shortening and text ceiling as `write_reply`.
 

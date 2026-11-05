@@ -11,9 +11,10 @@ test = false
 [dependencies]
 aihist = { path = ".." }
 pyo3 = { version = ">=0.29", features = ["extension-module"] }
-rgapi = "0.2.0"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 serde = "1"
 serde_json = { version = "1", features = ["preserve_order"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "time"] }
 
 [build-dependencies]
 pyo3-build-config = ">=0.29"

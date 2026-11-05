@@ -2,8 +2,44 @@
 
 use base64::Engine;
 use serde_json::{Value, json};
+use std::path::Path;
 
 use crate::Caps;
+
+/// The HTTP client, notebook filename and optional gateway root used to read linked media.
+pub struct Context<'a> {
+    pub http: &'a reqwest::Client,
+    pub root: Option<&'a Path>,
+    pub path: &'a Path,
+}
+
+/// Read a base64 data URL, HTTP(S) URL or notebook-relative file. A gateway root enables its `/static/` namespace
+/// and checked filesystem access; without one, ordinary absolute paths retain their meaning.
+pub async fn load(reference: &str, ctx: &Context<'_>) -> Result<Vec<u8>, String> {
+    if reference.starts_with("data:") {
+        let (header, data) = reference.split_once(',').ok_or("invalid data URL")?;
+        if !header.split(';').any(|p| p == "base64") { return Err("media data URL must be base64".into()); }
+        return decode(data);
+    }
+    if reference.starts_with("http://") || reference.starts_with("https://") {
+        let res = ctx.http.get(reference).send().await.map_err(|e| e.to_string())?
+            .error_for_status().map_err(|e| e.to_string())?;
+        return res.bytes().await.map(|b| b.to_vec()).map_err(|e| e.to_string());
+    }
+    let raw = reference.split('?').next().unwrap_or(reference);
+    let local = percent_encoding::percent_decode_str(raw).decode_utf8().map_err(|e| e.to_string())?;
+    let path = match ctx.root {
+        Some(root) => {
+            let path = if let Some(p) = local.strip_prefix("/static/") { p.into() } else {
+                if Path::new(local.as_ref()).is_absolute() { return Err("use /static/ or a dialog-relative media path".into()); }
+                ctx.path.parent().unwrap_or(Path::new("")).join(local.as_ref())
+            };
+            crate::paths::realpath(root, &path.to_string_lossy())?
+        }
+        None => ctx.path.parent().unwrap_or(Path::new("")).join(local.as_ref()),
+    };
+    std::fs::read(path).map_err(|e| e.to_string())
+}
 
 /// Largest image area, in pixels, sent to a model: four OpenAI high-detail tiles
 pub const IM_MAX: u32 = 768 * 768;

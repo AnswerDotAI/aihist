@@ -2,8 +2,9 @@
 //! dialog's path, the cells above the prompt, any warnings, then the prompt. Cells that aren't pinned are dropped,
 //! oldest first, to fit 80% of the model's input window.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
+use std::path::Path;
 
 use crate::Caps;
 use crate::cells::{ai_fmt, envelope, msg, parts, shown, stored_atts, text_str, truthy};
@@ -59,23 +60,50 @@ fn scaled(n: u64) -> u64 { (n as f64 * ALLOWANCE) as u64 }
 
 /// One message of model input: its content parts and, for a prompt, its stored reply. `cache` ends a stable prefix
 /// after the reply, which a provider can cache.
-struct Entry { parts: Vec<Value>, reply: Option<String>, pinned: bool, tokens: u64, cache: bool, boundary: bool }
+#[derive(Debug, Default, Deserialize, Serialize)]
+#[serde(default)]
+pub struct Turn { pub parts: Vec<Value>, pub reply: Option<String>, pub cache: bool }
+
+struct Entry { turn: Turn, tokens: u64 }
+
+struct Candidate { index: usize, tokens: u64, pinned: bool, boundary: bool }
 
 impl Entry {
     /// A message of one text part, such as a tag that opens a CRAFT
-    fn text(s: String) -> Entry { Entry { tokens: scaled(tokens::count(&s)), parts: vec![text(s)], reply: None, pinned: true, cache: false, boundary: false } }
+    fn text(s: String) -> Entry { Entry { tokens: scaled(tokens::count(&s)), turn: Turn { parts: vec![text(s)], ..Default::default() } } }
+}
+
+/// One cell's model parts and its normalized saved reply, with complete call IDs.
+pub async fn turn(nb: &Value, cell: &Value, caps: &Caps, time: Option<&str>, ctx: &media::Context<'_>) -> Turn {
+    Turn { parts: parts(nb, cell, caps, time, ctx).await, reply: crate::cells::is_prompt(cell).then(|| ai_fmt(&msg(cell).out)), cache: false }
 }
 
 /// Cell `cell` of notebook `nb` as a message. `time` is the cell's time in the user's time zone.
-fn entry(nb: &Value, cell: &Value, caps: &Caps, time: Option<&str>) -> Entry {
-    let m = msg(cell);
-    let reply = (m.typ == "prompt").then(|| ai_fmt(&m.out));
-    Entry { parts: parts(nb, cell, caps, time), reply, pinned: truthy(&cell["metadata"]["pinned"]), tokens: scaled(tokens::total(cell, stored_atts(nb, cell))), cache: false, boundary: false }
+async fn entry(nb: &Value, cell: &Value, caps: &Caps, time: Option<&str>, ctx: &media::Context<'_>) -> Entry {
+    Entry { turn: turn(nb, cell, caps, time, ctx).await, tokens: scaled(tokens::total(cell, stored_atts(nb, cell))) }
 }
 
 /// The messages of every cell in `nb` that the model sees
-fn shown_entries(nb: &Value, caps: &Caps) -> Vec<Entry> {
-    nb["cells"].as_array().into_iter().flatten().filter(|c| shown(c)).map(|c| entry(nb, c, caps, None)).collect()
+async fn shown_entries(nb: &Value, caps: &Caps, ctx: &media::Context<'_>) -> Vec<Entry> {
+    let mut res = vec![];
+    for c in nb["cells"].as_array().into_iter().flatten().filter(|c| shown(c)) { res.push(entry(nb, c, caps, None, ctx).await); }
+    res
+}
+
+/// Sorted unique references from shown preceding cells, the addressed prompt, and every CRAFT cell, before fitting.
+pub fn references(nb: &Value, prompt: &str, crafts: &[Craft]) -> Result<rgapi::CellRefs, String> {
+    let cells = nb["cells"].as_array().ok_or("the notebook has no cells")?;
+    let at = cells.iter().position(|c| c["id"] == prompt).ok_or_else(|| format!("no prompt cell {prompt}"))?;
+    let mut refs = rgapi::CellRefs::default();
+    for c in cells[..at].iter().filter(|c| shown(c)).chain(cells.get(at))
+        .chain(crafts.iter().flat_map(|c| c.nb["cells"].as_array().into_iter().flatten())) {
+        let r = rgapi::cell_refs(c);
+        refs.vars.extend(r.vars);
+        refs.cmds.extend(r.cmds);
+        refs.tools.extend(r.tools);
+    }
+    for names in [&mut refs.vars, &mut refs.cmds, &mut refs.tools] { names.sort(); names.dedup(); }
+    Ok(refs)
 }
 
 /// A note to the model that the user may need to know about
@@ -123,7 +151,7 @@ pub const VARS_REPLY: &str = "Understood, I will use these variable values.";
 
 /// `hist` within `budget` tokens: every pinned message and the newest suffix starting at a chunk boundary.
 /// Also returns how many were dropped.
-fn fit(hist: Vec<Entry>, budget: u64) -> (Vec<Entry>, usize) {
+fn fit(hist: Vec<Candidate>, budget: u64) -> (Vec<usize>, usize) {
     let mut used: u64 = hist.iter().filter(|e| e.pinned).map(|e| e.tokens).sum();
     let mut start = hist.len();
     for (i, e) in hist.iter().enumerate().rev() {
@@ -132,53 +160,76 @@ fn fit(hist: Vec<Entry>, budget: u64) -> (Vec<Entry>, usize) {
         if e.boundary { start = i }
     }
     let n = hist.len();
-    let kept: Vec<Entry> = hist.into_iter().enumerate().filter_map(|(i, e)| (e.pinned || i >= start).then_some(e)).collect();
+    let kept: Vec<usize> = hist.into_iter().enumerate().filter_map(|(i, e)| (e.pinned || i >= start).then_some(e.index)).collect();
     let dropped = n - kept.len();
     (kept, dropped)
 }
 
-/// Responses items for `entries`. Each prompt ends a user turn and adds its stored reply, except the last entry,
-/// which is the prompt being answered.
-fn turns(entries: Vec<Entry>) -> Vec<Value> {
-    let (mut input, mut user) = (vec![], vec![]);
-    let n = entries.len();
-    for (i, e) in entries.into_iter().enumerate() {
+/// Group cell parts through each supplied reply; a final unanswered turn retains its parts without a reply.
+pub fn group_turns(entries: Vec<Turn>) -> Vec<Turn> {
+    let (mut res, mut user) = (vec![], vec![]);
+    for e in entries {
         user.extend(e.parts);
-        let Some(r) = e.reply.filter(|_| i + 1 < n) else { continue };
-        input.push(json!({"type": "message", "role": "user", "content": std::mem::take(&mut user)}));
+        if e.reply.is_some() { res.push(Turn { parts: std::mem::take(&mut user), reply: e.reply, cache: e.cache }); }
+    }
+    if !user.is_empty() { res.push(Turn { parts: user, ..Default::default() }); }
+    res
+}
+
+/// Responses input items for cell contributions. All supplied replies and complete call IDs are retained.
+pub fn turns(entries: Vec<Turn>) -> Vec<Value> {
+    let mut input = vec![];
+    for e in group_turns(entries) {
+        input.push(json!({"type": "message", "role": "user", "content": e.parts}));
+        let Some(r) = e.reply else { continue };
         input.extend(reply::items(&reply::parse(&r)));
         if e.cache { input.last_mut().expect("a reply's items")["content"][0]["cache_control"] = json!({"type": "ephemeral"}) }
     }
-    input.push(json!({"type": "message", "role": "user", "content": user}));
     input
+}
+
+fn model_call_ids(items: &mut [Value]) {
+    for item in items {
+        if matches!(item["type"].as_str(), Some("function_call" | "function_call_output")) {
+            if let Some(id) = item["call_id"].as_str() { item["call_id"] = id.chars().take(64).collect::<String>().into(); }
+        }
+    }
 }
 
 /// The model input for prompt `p`: the examples, the CRAFTs, the `$` values, the dialog's path, the cells above the
 /// prompt that fit, any warnings, then the prompt
-pub fn build(p: &Prompt) -> Result<Vec<Value>, String> {
+pub async fn build(p: &Prompt, ctx: &media::Context<'_>) -> Result<Vec<Value>, String> {
     let all = p.nb["cells"].as_array().ok_or("the notebook has no cells")?;
     let at = all.iter().position(|c| c["id"] == p.prompt.as_str()).ok_or_else(|| format!("no prompt cell {}", p.prompt))?;
     let caps = &p.caps;
-    let mut pre: Vec<Entry> = p.examples.iter().flat_map(|nb| shown_entries(nb, caps)).collect();
-    if let Some(e) = pre.last_mut() { e.cache = true }
+    let mut pre = vec![];
+    let example_ctx = media::Context { path: Path::new(""), ..*ctx };
+    for nb in &p.examples { pre.extend(shown_entries(nb, caps, &example_ctx).await); }
+    if let Some(e) = pre.last_mut() { e.turn.cache = true }
     if !p.crafts.is_empty() {
         pre.push(Entry::text("# Loaded CRAFTs.".into()));
         for c in &p.crafts {
             pre.push(Entry::text(format!("<craft-block{}>", xml_attr("path", &format!("/{}", c.path)))));
-            pre.extend(shown_entries(&c.nb, caps));
+            let craft_ctx = media::Context { path: Path::new(&c.path), ..*ctx };
+            pre.extend(shown_entries(&c.nb, caps, &craft_ctx).await);
             pre.push(Entry::text("</craft-block>".into()));
         }
-        pre.push(Entry { reply: Some("Ok!".into()), cache: true, ..Entry::text(envelope("End of CRAFTs.", "crafts", None)) });
+        let mut end = Entry::text(envelope("End of CRAFTs.", "crafts", None));
+        end.turn.reply = Some("Ok!".into());
+        end.turn.cache = true;
+        pre.push(end);
     }
     let (vparts, undef) = vars(&p.vars, caps);
     if !vparts.is_empty() {
         let tokens = vparts.iter().map(|p| p["text"].as_str().map_or(tokens::IMG_TOKENS, |t| scaled(tokens::count(t)))).sum();
-        pre.push(Entry { parts: vparts, reply: Some(VARS_REPLY.into()), pinned: true, tokens, cache: false, boundary: false });
+        pre.push(Entry { turn: Turn { parts: vparts, reply: Some(VARS_REPLY.into()), cache: false }, tokens });
     }
     if !p.path.is_empty() { pre.push(Entry::text(format!("<dialog{}/>", xml_attr("path", &p.path)))) }
     let time = |c: &Value| p.times.get(c["id"].as_str().unwrap_or_default()).and_then(Value::as_str);
     let mut last: Vec<Entry> = warning(&undef, &p.tool_errors, &p.craft_errors).map(Entry::text).into_iter().collect();
-    last.push(entry(&p.nb, &all[at], caps, time(&all[at])));
+    let mut target = entry(&p.nb, &all[at], caps, time(&all[at]), ctx).await;
+    target.turn.reply = None;
+    last.push(target);
     let (mut boundary, mut after_large) = (false, false);
     let hist = all[..at].iter().enumerate().filter_map(|(i, c)| {
         let m = msg(c);
@@ -186,15 +237,19 @@ pub fn build(p: &Prompt) -> Result<Vec<Value>, String> {
         boundary |= i % 10 == 0 || large || after_large;
         after_large = large;
         if !shown(c) { return None }
-        let e = Entry { boundary, ..entry(&p.nb, c, caps, time(c)) };
+        let e = Candidate { index: i, boundary, pinned: truthy(&c["metadata"]["pinned"]), tokens: scaled(tokens::total(c, stored_atts(&p.nb, c))) };
         boundary = false;
         Some(e)
     }).collect();
     let fixed: u64 = pre.iter().chain(&last).map(|e| e.tokens).sum::<u64>() + p.instructions.as_deref().map_or(0, |s| scaled(tokens::count(s)));
     let budget = (caps.max_input_tokens.unwrap_or(WINDOW) as f64 * FILL) as u64;
-    let (hist, dropped) = fit(hist, budget.saturating_sub(fixed));
+    let (selected, dropped) = fit(hist, budget.saturating_sub(fixed));
+    let mut hist = vec![];
+    for i in selected { hist.push(entry(&p.nb, &all[i], caps, time(&all[i]), ctx).await); }
     if dropped > 0 {
         last.insert(0, Entry::text(reminder(&format!("Notify the user if relevant: {dropped} older non-pinned dialog message(s) were omitted to fit the model context."))));
     }
-    Ok(turns(pre.into_iter().chain(hist).chain(last).collect()))
+    let mut input = turns(pre.into_iter().chain(hist).chain(last).map(|e| e.turn).collect());
+    model_call_ids(&mut input);
+    Ok(input)
 }

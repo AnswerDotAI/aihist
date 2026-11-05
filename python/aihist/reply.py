@@ -2,7 +2,7 @@
 import json, re
 from fastcore.xtras import fenced, fenced_blocks
 from aidialog.msg_parts import (Msg, Text, Thinking, ToolUse, ToolResult, MdStr, FullResponse, split_fence_msgs, think_start, think_end,
-    tool_info, tool_text)
+    tool_info, tool_text, dict2msg)
 from . import _core
 
 __all__ = ['usage_info', 're_think', 'parse_tools', 'set_result', 'strip_tools', 'conv_tools', 'fmt2hist', 'Reply', 'write_reply', 'tool_md', 'usage_md', 'fmt_tools']
@@ -40,26 +40,12 @@ def conv_tools(s):
     def _tok(m): return fenced(json.dumps(dict(summary=m['summ'], detail=m['det']), ensure_ascii=False), usage_info)
     return _lg_token.sub(_tok, _lg_tools.sub(_tool, s))
 
-def _tool_parts(t):
-    "A saved tool block as an ordinary matched `(ToolUse, ToolResult)` pair"
-    text = tool_text(t['result'])
-    return (ToolUse(id=t['id'], name=t['name'], arguments=t['args']),
-            ToolResult(id=t['id'], name=t['name'], text=MdStr(text) if t.get('md') else text))
-
 def fmt2hist(outp:str)->list[Msg]:
     "Saved reply `outp` as chat messages: assistant text and tool calls, then a tool message with each round's results"
-    hist,asst,res = [],[],[]
-    for b in json.loads(_core.parse_reply(outp)):
-        if 'text' in b:
-            if res: hist,asst,res = hist+[Msg('assistant', asst), Msg('tool', res)],[],[]
-            asst.append(Text(b['text']))
-        else:
-            tu,tr = _tool_parts(b['tool'])
-            asst.append(tu)
-            res.append(tr)
-    if res: hist += [Msg('assistant', asst), Msg('tool', res)]
-    elif asst: hist.append(Msg('assistant', asst))
-    if not hist or hist[-1].role == 'tool': hist.append(Msg('assistant', [Text('.')]))
+    hist = [dict2msg(m) for m in json.loads(_core.reply_messages(outp))]
+    for m in hist:
+        for p in m.content:
+            if isinstance(p, ToolResult) and p.md: p.text,p.md = MdStr(p.text),False
     return split_fence_msgs(hist)
 
 def _part(p):

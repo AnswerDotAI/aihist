@@ -130,28 +130,50 @@ pub fn parse(reply: &str) -> Vec<Block> {
 /// A Responses input item for assistant prose
 fn assistant(text: &str) -> Value { json!({"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": text}]}) }
 
-/// Responses input items for a reply's blocks, grouped as a round of a chat: prose and the calls after it, then the
-/// calls' outputs. A reply that is empty or ends with outputs gets a final "." message.
-pub fn items(blocks: &[Block]) -> Vec<Value> {
-    let (mut res, mut calls, mut outs) = (vec![], vec![], vec![]);
+/// A saved reply's chat message in aidialog's canonical message shape.
+#[derive(Serialize)]
+pub struct HistoryMsg { pub role: &'static str, pub content: Vec<Part> }
+
+/// Prose and calls in one assistant message, then their results. A reply that is empty or ends with results gets a
+/// final "." message. Stored server evidence restores ordinary matched calls and results.
+pub fn messages(blocks: &[Block]) -> Vec<HistoryMsg> {
+    let (mut res, mut asst, mut outs) = (vec![], vec![], vec![]);
     for b in blocks {
         match b {
             Block::Text(t) => {
-                if !outs.is_empty() { res.append(&mut calls); res.append(&mut outs); }
-                calls.push(assistant(t));
+                if !outs.is_empty() {
+                    res.push(HistoryMsg { role: "assistant", content: std::mem::take(&mut asst) });
+                    res.push(HistoryMsg { role: "tool", content: std::mem::take(&mut outs) });
+                }
+                asst.push(Part::Text { text: Some(t.clone()) });
             }
             Block::Tool(t) => {
-                let id: String = t.id.chars().take(64).collect();
-                calls.push(json!({"type": "function_call", "call_id": id, "name": t.name, "arguments": t.args.to_string()}));
+                asst.push(Part::ToolUse(Call { id: Some(t.id.clone()), name: t.name.clone(), arguments: t.args.as_object().cloned().unwrap_or_default(), ..Default::default() }));
                 let output = match &t.result { Value::String(s) => s.clone(), v => v.to_string() };
-                outs.push(json!({"type": "function_call_output", "call_id": id, "output": output}));
+                outs.push(Part::ToolResult(Call { id: Some(t.id.clone()), name: t.name.clone(), text: Some(output), md: t.md, ..Default::default() }));
             }
         }
     }
     let ends_with_outputs = !outs.is_empty();
-    res.append(&mut calls);
-    res.append(&mut outs);
-    if res.is_empty() || ends_with_outputs { res.push(assistant(".")) }
+    if !asst.is_empty() { res.push(HistoryMsg { role: "assistant", content: asst }); }
+    if !outs.is_empty() { res.push(HistoryMsg { role: "tool", content: outs }); }
+    if res.is_empty() || ends_with_outputs { res.push(HistoryMsg { role: "assistant", content: vec![Part::Text { text: Some(".".into()) }] }); }
+    res
+}
+
+/// Responses items for a saved reply, preserving its complete call IDs.
+pub fn items(blocks: &[Block]) -> Vec<Value> {
+    let mut res = vec![];
+    for m in messages(blocks) {
+        for p in m.content {
+            match p {
+                Part::Text { text: Some(t) } => res.push(assistant(&t)),
+                Part::ToolUse(c) => res.push(json!({"type": "function_call", "call_id": c.id, "name": c.name, "arguments": Value::Object(c.arguments).to_string()})),
+                Part::ToolResult(c) => res.push(json!({"type": "function_call_output", "call_id": c.id, "output": c.text.unwrap_or_default()})),
+                _ => {}
+            }
+        }
+    }
     res
 }
 
@@ -162,7 +184,7 @@ fn limit_text(text: &str) -> String { crate::output::keep_ends(text.into(), 0, c
 
 /// One part of a turn, in the order the model produced it, tagged as aidialog's `msg2dict` tags parts.
 /// Other part types, such as thinking, aren't stored.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Part {
     Text { text: Option<String> },
@@ -174,7 +196,7 @@ pub enum Part {
 }
 
 /// A tool call or its result. A server call carries its result in `text`.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Call {
     pub id: Option<String>,

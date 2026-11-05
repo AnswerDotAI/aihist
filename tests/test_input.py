@@ -53,6 +53,12 @@ def test_dialog_cells():
     small = build(dlg, last_cell(dlg), dict(max_input_tokens=1))
     assert len(small) == 1 and 'Use metres.' in texts(small[0])[0]
     assert re.search(r'5 older non-pinned dialog message\(s\) were omitted', texts(small[0])[1])
+
+    # Marked media stays with its cell when the context is fitted, without host-prepared notebook fields.
+    dlg['cells'][2].update(cell_type='markdown', source=f'![](data:image/png;base64,{base64.b64encode(png).decode()}#ai)')
+    assert json.dumps(build(dlg, last_cell(dlg), vision)).count('"input_image"')==3
+    assert '"input_image"' not in json.dumps(build(dlg, last_cell(dlg), dict(vision, max_input_tokens=1)))
+
     # Cutoffs use original dialog positions, including pinned/skipped messages, and stay put as the dialog grows.
     d = Dialog()
     msgs = [d.mk_message('word '*100, msg_type='note', meta=dict(pinned=i==2, skipped=i==3)) for i in range(31)]

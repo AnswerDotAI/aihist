@@ -16,11 +16,14 @@ The root package is a pure Rust crate, published to crates.io. Rust users who de
 - `cells`: one notebook cell as a dialog message, and as a model reads it
 - `input`: a prompt's model input, with the examples, CRAFTs, `$` values and warnings that a host supplies
 - `output`: code outputs and tool results as a model reads them
-- `media`: MIME detection, resizing images, and media tags
+- `media`: linked-media loading, MIME detection, resizing images, and media tags
+- `paths`: checked filesystem resolution shared with gateway file access
 - `tokens`: approximate token counts
 - `reply`: reading and writing saved replies
 
 The Python extension is the `py` package. It depends on the root crate, is never published, and maturin builds it through `[tool.maturin].manifest-path`. Its functions take and return JSON as strings. The `aihist` Python package in `python/` converts aidialog objects to that JSON and back, in `aihist.reply` and `aihist.hist`. `tests/*.py` tests the Python API, and `cargo test` runs the crate's unit tests.
+
+I/O bindings release the GIL and use one lazily initialized Tokio runtime with one worker and one HTTP client. Rust hosts supply their own client and runtime. Model input fits original cell indices before loading the retained history's media. Full transcript grouping retains complete call IDs; only `input::build` applies the existing model-input 64-character normalization.
 
 aihist keeps aidialog's notebook and saved-reply formats. aidialog writes saved replies for fastllm, so a saved reply has two writers, aidialog's `hist2fmt` and this crate's `reply::write`. `tests/test_basic.py` checks that they write the same blocks.
 

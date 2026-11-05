@@ -10,9 +10,21 @@ use crate::Caps;
 use crate::media::{self, IMG_MIMES, text, xml_attr};
 use crate::{output, reply, tokens};
 
+pub use rgapi::cell_refs as refs;
+
 /// Attachments a message refers to: `![...](attachment:id)` and `<!-- last_output:uuid -->`
 static ATT_REF: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"!\[[^\]]*\]\(attachment:([^)]+)\)|<!-- last_output:([0-9a-f-]{36}) -->").expect("a valid regex"));
+
+static MEDIA_REF: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"!\[[^\]]*\]\(([^)#]+)#ai\)").expect("a valid regex"));
+
+/// External media links marked #ai, in source order, from a note or prompt's content.
+pub fn media_refs(cell: &Value) -> Vec<String> {
+    if cell["cell_type"] != "markdown" && !is_prompt(cell) { return vec![]; }
+    MEDIA_REF.captures_iter(&content(cell)).map(|c| c[1].to_owned()).filter(|s| !s.starts_with("attachment:")).collect()
+}
+
 
 /// A cell's attachments: its own, or for a code cell, the notebook's `metadata.attachments` entry for its id. nbformat
 /// allows attachments only on markdown and raw cells, so aidialog's notebook format keeps a code cell's there.
@@ -111,17 +123,20 @@ pub fn xml(cell: &Value, m: &Msg, time: Option<&str>) -> String {
     format!("<{tag}{attrs}>{}{out}</{tag}>", m.content)
 }
 
-/// The media a message shows the model: the attachments its text refers to, then a code cell's output images
-pub fn media(atts: Option<&Map<String, Value>>, cell: &Value, m: &Msg, caps: &Caps) -> Vec<Value> {
+/// Referenced attachments, marked links, then code output images.
+pub async fn media(nb: &Value, cell: &Value, caps: &Caps, ctx: &media::Context<'_>) -> Vec<Value> {
+    let source = content(cell);
     let refs: HashSet<&str> =
-        ATT_REF.captures_iter(&m.content).filter_map(|c| c.get(1).or_else(|| c.get(2))).map(|g| g.as_str()).collect();
+        ATT_REF.captures_iter(&source).filter_map(|c| c.get(1).or_else(|| c.get(2)))
+            .map(|g| g.as_str().strip_suffix("#ai").unwrap_or(g.as_str())).collect();
     let mut res = vec![];
-    for (id, a) in atts.into_iter().flatten().filter(|(id, _)| refs.contains(id.as_str())) {
+    for (id, a) in stored_atts(nb, cell).into_iter().flatten().filter(|(id, _)| refs.contains(id.as_str())) {
         let data = a.as_object().and_then(|o| o.values().next()).map(text_str)
             .ok_or_else(|| "media data unavailable".to_string()).and_then(|s| media::decode(&s));
         res.extend(media::item("content", id, data, None, caps));
     }
-    if m.typ == "code" {
+    for reference in media_refs(cell) { res.extend(media::item("content", &reference, media::load(&reference, ctx).await, None, caps)); }
+    if cell["cell_type"] == "code" && !is_prompt(cell) {
         for d in cell["outputs"].as_array().into_iter().flatten().filter_map(|o| o["data"].as_object()) {
             let Some((mime, v)) = tokens::first_mime(d, &IMG_MIMES) else { continue };
             res.extend(media::output_item(mime, &text_str(v), caps));
@@ -138,9 +153,9 @@ pub fn shown(cell: &Value) -> bool {
 
 /// Cell `cell` of notebook `nb` as a model reads it: its media, then its XML. `time` is the cell's time in the user's
 /// time zone.
-pub fn parts(nb: &Value, cell: &Value, caps: &Caps, time: Option<&str>) -> Vec<Value> {
+pub async fn parts(nb: &Value, cell: &Value, caps: &Caps, time: Option<&str>, ctx: &media::Context<'_>) -> Vec<Value> {
     let m = msg(cell);
-    let mut res = media(stored_atts(nb, cell), cell, &m, caps);
+    let mut res = media(nb, cell, caps, ctx).await;
     res.push(text(xml(cell, &m, time)));
     res
 }

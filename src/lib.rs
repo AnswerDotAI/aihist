@@ -12,6 +12,7 @@ pub mod cells;
 pub mod input;
 pub mod media;
 pub mod output;
+pub mod paths;
 pub mod reply;
 pub mod tokens;
 

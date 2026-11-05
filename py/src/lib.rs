@@ -4,6 +4,11 @@ use aihist::{Caps, cells, input, media, output, reply, tokens};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use serde_json::Value;
+use std::{path::PathBuf, sync::LazyLock};
+
+static RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(||
+    tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().expect("a history I/O runtime"));
+static HTTP: LazyLock<reqwest::Client> = LazyLock::new(reqwest::Client::new);
 
 fn de<T: serde::de::DeserializeOwned>(s: &str) -> PyResult<T> { serde_json::from_str(s).map_err(|e| PyValueError::new_err(e.to_string())) }
 fn ser(v: impl serde::Serialize) -> String { serde_json::to_string(&v).expect("values serialize") }
@@ -11,21 +16,72 @@ fn caps(s: &str) -> PyResult<Caps> { de(s) }
 
 /// Responses input items for the prompt that `prompt`, an `input::Prompt` as JSON, describes
 #[pyfunction]
-fn build(prompt: &str) -> PyResult<String> { Ok(ser(input::build(&de(prompt)?).map_err(PyValueError::new_err)?)) }
+#[pyo3(signature = (prompt, media_path=None))]
+fn build(py: Python<'_>, prompt: &str, media_path: Option<PathBuf>) -> PyResult<String> {
+    let p: input::Prompt = de(prompt)?;
+    let path = media_path.unwrap_or_default();
+    py.detach(move || {
+        let ctx = media::Context { http: &HTTP, root: None, path: &path };
+        RUNTIME.block_on(input::build(&p, &ctx)).map(ser).map_err(PyValueError::new_err)
+    })
+}
 
 /// Cell `cell` of notebook `nb` as a model reads it: its media, then its XML
 #[pyfunction]
-#[pyo3(signature = (nb, cell, caps_, time=None))]
-fn cell_parts(nb: &str, cell: &str, caps_: &str, time: Option<&str>) -> PyResult<String> {
-    Ok(ser(cells::parts(&de(nb)?, &de(cell)?, &caps(caps_)?, time)))
+#[pyo3(signature = (nb, cell, caps_, time=None, media_path=None))]
+fn cell_parts(py: Python<'_>, nb: &str, cell: &str, caps_: &str, time: Option<&str>, media_path: Option<PathBuf>) -> PyResult<String> {
+    let (nb, cell, caps): (Value, Value, Caps) = (de(nb)?, de(cell)?, caps(caps_)?);
+    let (path, time) = (media_path.unwrap_or_default(), time.map(String::from));
+    Ok(py.detach(move || {
+        let ctx = media::Context { http: &HTTP, root: None, path: &path };
+        ser(RUNTIME.block_on(cells::parts(&nb, &cell, &caps, time.as_deref(), &ctx)))
+    }))
 }
 
-/// The media that cell `cell` of notebook `nb` shows a model: the attachments it refers to, then a code cell's images
+/// The media cell `cell` shows a model: referenced attachments, marked links, then code output images
 #[pyfunction]
-fn cell_media(nb: &str, cell: &str, caps_: &str) -> PyResult<String> {
-    let (nb, cell): (Value, Value) = (de(nb)?, de(cell)?);
-    Ok(ser(cells::media(cells::stored_atts(&nb, &cell), &cell, &cells::msg(&cell), &caps(caps_)?)))
+#[pyo3(signature = (nb, cell, caps_, media_path=None))]
+fn cell_media(py: Python<'_>, nb: &str, cell: &str, caps_: &str, media_path: Option<PathBuf>) -> PyResult<String> {
+    let (nb, cell, caps): (Value, Value, Caps) = (de(nb)?, de(cell)?, caps(caps_)?);
+    let path = media_path.unwrap_or_default();
+    Ok(py.detach(move || {
+        let ctx = media::Context { http: &HTTP, root: None, path: &path };
+        ser(RUNTIME.block_on(cells::media(&nb, &cell, &caps, &ctx)))
+    }))
 }
+
+/// A cell's model parts and normalized saved reply.
+#[pyfunction]
+#[pyo3(signature = (nb, cell, caps_, time=None, media_path=None))]
+fn cell_turn(py: Python<'_>, nb: &str, cell: &str, caps_: &str, time: Option<&str>, media_path: Option<PathBuf>) -> PyResult<String> {
+    let (nb, cell, caps): (Value, Value, Caps) = (de(nb)?, de(cell)?, caps(caps_)?);
+    let (path, time) = (media_path.unwrap_or_default(), time.map(String::from));
+    Ok(py.detach(move || {
+        let ctx = media::Context { http: &HTTP, root: None, path: &path };
+        ser(RUNTIME.block_on(input::turn(&nb, &cell, &caps, time.as_deref(), &ctx)))
+    }))
+}
+
+/// Group cell contributions through their supplied replies, retaining the final reply.
+#[pyfunction]
+fn group_turns(turns: &str) -> PyResult<String> { Ok(ser(input::group_turns(de(turns)?))) }
+
+/// Responses items for cell contributions, without fitting or shortening IDs.
+#[pyfunction]
+fn turns(turns: &str) -> PyResult<String> { Ok(ser(input::turns(de(turns)?))) }
+
+/// Sorted unique references from a prompt's prefit context.
+#[pyfunction]
+#[pyo3(signature = (nb, prompt, crafts="[]"))]
+fn references(nb: &str, prompt: &str, crafts: &str) -> PyResult<String> {
+    let r = input::references(&de(nb)?, prompt, &de::<Vec<input::Craft>>(crafts)?).map_err(PyValueError::new_err)?;
+    Ok(ser(serde_json::json!({"vars": r.vars, "cmds": r.cmds, "tools": r.tools})))
+}
+
+/// External media links marked #ai in a note or prompt
+#[pyfunction]
+fn media_refs(cell: &str) -> PyResult<Vec<String>> { Ok(cells::media_refs(&de(cell)?)) }
+
 
 /// Cell `cell` as the XML a model reads
 #[pyfunction]
@@ -46,7 +102,7 @@ fn cell_reply(cell: &str) -> PyResult<Option<String>> {
 /// The sigil references in `cell`, as `{vars, cmds, tools}`
 #[pyfunction]
 fn cell_refs(cell: &str) -> PyResult<String> {
-    let r = rgapi::cell_refs(&de(cell)?);
+    let r = cells::refs(&de(cell)?);
     Ok(ser(serde_json::json!({"vars": r.vars, "cmds": r.cmds, "tools": r.tools})))
 }
 
@@ -118,6 +174,10 @@ fn tool_result(outputs: &str, caps_: &str, code: bool) -> PyResult<String> {
 #[pyfunction]
 fn parse_reply(text: &str) -> String { ser(reply::parse(text)) }
 
+/// Saved reply as canonical aidialog messages, with native round grouping.
+#[pyfunction]
+fn reply_messages(text: &str) -> String { ser(reply::messages(&reply::parse(text))) }
+
 /// `text` split at its tool blocks, as `(text before, block JSON)` pairs, with `None` for the text after the last
 #[pyfunction]
 fn tool_segments(text: &str) -> String { ser(reply::segments(text)) }
@@ -173,6 +233,11 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(build, m)?)?;
     m.add_function(wrap_pyfunction!(cell_parts, m)?)?;
     m.add_function(wrap_pyfunction!(cell_media, m)?)?;
+    m.add_function(wrap_pyfunction!(cell_turn, m)?)?;
+    m.add_function(wrap_pyfunction!(group_turns, m)?)?;
+    m.add_function(wrap_pyfunction!(turns, m)?)?;
+    m.add_function(wrap_pyfunction!(references, m)?)?;
+    m.add_function(wrap_pyfunction!(media_refs, m)?)?;
     m.add_function(wrap_pyfunction!(cell_xml, m)?)?;
     m.add_function(wrap_pyfunction!(cell_refs, m)?)?;
     m.add_function(wrap_pyfunction!(shown, m)?)?;
@@ -190,6 +255,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(merge, m)?)?;
     m.add_function(wrap_pyfunction!(tool_result, m)?)?;
     m.add_function(wrap_pyfunction!(parse_reply, m)?)?;
+    m.add_function(wrap_pyfunction!(reply_messages, m)?)?;
     m.add_function(wrap_pyfunction!(tool_segments, m)?)?;
     m.add_function(wrap_pyfunction!(set_result, m)?)?;
     m.add_function(wrap_pyfunction!(strip_blocks, m)?)?;

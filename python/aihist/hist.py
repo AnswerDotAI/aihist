@@ -6,15 +6,15 @@ from zoneinfo import ZoneInfo
 from fastcore.utils import first, listify, loop_first, rtoken_hex
 from fastcore.nbio import render_text
 from fastcore.xtras import fenced
-from aidialog.dialog import Dialog, Attachment, code_output, render_md, render_outputs_ai, export_filter, sprompt, scode, snote, sraw
+from aidialog.dialog import Dialog, Attachment, code_output, render_md, export_filter, sprompt, scode, snote, sraw
 from aidialog.ipynb import get_ipynb, msgs2ipynb
-from aidialog.msg_parts import Msg, Text, ToolUse, ToolResult, data_url, hist2fmt, mk_content, mk_part, mk_tr_details, resp_part
+from aidialog.msg_parts import Msg, Text, ToolUse, ToolResult, data_url, hist2fmt, mk_content, mk_part, resp_part
 from . import _core
-from .reply import fmt2hist, fmt_tools
+from .reply import fmt2hist, fmt_tools, write_reply
 
 __all__ = ['UNSUPPORTED_MSG', 'im_max', 'IMG_TOKS', 'jwrap', 'to_local_time', 'media_item', 'resize_img', 'prep_img', 'pdf_pages', 'count_tokens',
     'output_parts', 'merge_media', 'tool_result', 'get_refs', 'get_exprs', 'is_nameerr', 'vars_tag', 'vars_hist', 'task_tags', 'warning_tag',
-    'local_time', 'hist_xml', 'to_media', 'to_parts', 'tool_call', 'build', 'dlg2hist', 'reply2chat', 'dlg2chat', 'chat2dlg', 'reply2dlg',
+    'local_time', 'cell_turn', 'cell_media', 'cell_reply', 'is_shown', 'references', 'hist_xml', 'to_media', 'to_parts', 'tool_call', 'build', 'dlg2hist', 'reply2chat', 'dlg2chat', 'chat2dlg', 'reply2dlg',
     'dlg2reply', 'msg2md', 'dlg2md']
 
 UNSUPPORTED_MSG,im_max,IMG_TOKS = _core.UNSUPPORTED,_core.IM_MAX,_core.IMG_TOKENS
@@ -129,21 +129,42 @@ def local_time(m):
     return to_local_time(t, getattr(m.dlg, 'timezone', 'UTC') if m.dlg else 'UTC')
 
 def _cell(m):
-    "Message `m` as JSON for `_core`: the notebook holding it, which homes a code cell's attachments, and its cell"
+    "A temporary notebook and its cell as JSON for `_core`"
     nb = msgs2ipynb([m])
     return json.dumps(nb), json.dumps(nb['cells'][0])
 
+def cell_turn(m, aim_info=None):
+    "Canonical model parts and normalized saved reply for one message, without fitting or shortening call IDs"
+    return json.loads(_core.cell_turn(*_cell(m), _caps(aim_info), local_time(m) or None, getattr(m.dlg, 'path_', None) or ''))
+
+def cell_media(m, aim_info=None):
+    "Canonical Responses media parts for one message"
+    return json.loads(_core.cell_media(*_cell(m), _caps(aim_info), getattr(m.dlg, 'path_', None) or ''))
+
+def cell_reply(m):
+    "A prompt's normalized saved reply, or None for another message type"
+    return _core.cell_reply(_cell(m)[1])
+
+def is_shown(m):
+    "Whether a context includes message `m`, apart from an explicitly addressed prompt"
+    return _core.shown(_cell(m)[1])
+
+def references(nb, prompt, crafts=()):
+    "Sorted unique vars/cmds/tools from the prompt's prefit context, including an explicitly addressed skipped prompt"
+    if isinstance(nb, Dialog): nb = get_ipynb(nb)
+    return json.loads(_core.references(json.dumps(nb), prompt, json.dumps(crafts)))
+
 def hist_xml(m):
     "Message `m` as the XML a model reads, with its local run time"
-    return _core.cell_xml(_cell(m)[1], local_time(m) or None)
+    return _core.cell_xml(json.dumps(msgs2ipynb([m])['cells'][0]), local_time(m) or None)
 
-def to_media(m, aim_info):
-    "The media message `m` shows a model: the attachments it refers to, then a code message's output images"
-    return _content(json.loads(_core.cell_media(*_cell(m), _caps(aim_info))))
+def to_media(m, aim_info=None):
+    "The media message `m` shows a model: referenced attachments, marked links, then code output images"
+    return _content(cell_media(m, aim_info))
 
-def to_parts(m, aim_info):
+def to_parts(m, aim_info=None):
     "Message `m` as history parts: its media, then its XML"
-    return _content(json.loads(_core.cell_parts(*_cell(m), _caps(aim_info), local_time(m) or None)))
+    return _content(json.loads(_core.cell_parts(*_cell(m), _caps(aim_info), local_time(m) or None, getattr(m.dlg, 'path_', None) or '')))
 
 def _dotted_name(s): return bool(s) and all(p.isidentifier() for p in s.split('.'))
 
@@ -163,8 +184,9 @@ def tool_call(m):
 
 def build(nb, prompt, aim_info=None, **kw):
     "Responses input items for prompt cell `prompt` of `nb`, a `Dialog` or notebook dict, with the extra context `kw` that `aihist::input::Prompt` lists"
+    path = kw.get('path', getattr(nb, 'path_', None)) or ''
     if isinstance(nb, Dialog): nb = get_ipynb(nb)
-    return json.loads(_core.build(json.dumps(dict(nb=nb, prompt=prompt, caps=_cdict(aim_info), **kw), default=str)))
+    return json.loads(_core.build(json.dumps(dict(nb=nb, prompt=prompt, caps=_cdict(aim_info), **kw), default=str), path))
 
 def dlg2hist(
     dlg, # A `Dialog`, or iterable of messages, ending with a prompt
@@ -172,15 +194,12 @@ def dlg2hist(
     plain:bool=False, # Render prompts as bare content, without the serving envelope?
 ):
     "`dlg` as model history: each user turn's parts, then its reply"
-    msgs = [(m, *_cell(m)) for m in (dlg.messages if isinstance(dlg, Dialog) else dlg)]
-    msgs = [o for o in msgs if _core.shown(o[2])]
-    if not msgs or msgs[-1][0].msg_type != sprompt: raise ValueError("dlg2hist requires the messages to end with a prompt")
-    caps,res = _caps(aim_info),[]
-    for m,nb,cell in reversed(msgs):
-        parts = _content(json.loads(_core.cell_parts(nb, cell, caps, local_time(m) or None)))
-        if m.msg_type != sprompt: res[-1] = parts + res[-1]
-        else: res += [_core.cell_reply(cell), _content(json.loads(_core.cell_media(nb, cell, caps))) + [m.content] if plain else parts]
-    return res[::-1]
+    msgs = [m for m in (dlg.messages if isinstance(dlg, Dialog) else dlg) if is_shown(m)]
+    if not msgs or msgs[-1].msg_type != sprompt: raise ValueError("dlg2hist requires the messages to end with a prompt")
+    entries = [dict(parts=cell_media(m, aim_info)+[dict(type='input_text', text=m.content)], reply=cell_reply(m))
+        if plain and m.msg_type==sprompt else cell_turn(m, aim_info) for m in msgs]
+    grouped = json.loads(_core.group_turns(json.dumps(entries)))
+    return [t for e in grouped for t in (_content(e['parts']), e['reply'])]
 
 def _explode(a, t):
     "One call/result pair per tool use in a batched assistant/tool pair"
@@ -270,12 +289,18 @@ def _msg2tr(m):
     "Tool-result `Part` recovered from code message `m`, whose source is the literal call"
     if (p := _parse_call(m.content)) is None: raise ValueError(f"not a keyword-only tool call: {m.content!r}")
     tid = m.meta.setdefault('tool_id', 'call_'+rtoken_hex(8))
-    return ToolResult(id=tid, name=p[0], arguments=p[1], text=render_outputs_ai(m.output or []))
+    r = json.loads(_core.tool_result(json.dumps(m.output or []), _caps(None), True))
+    return ToolResult(id=tid, name=p[0], arguments=p[1], text=r['text'], md=r['md'], full=r['full'])
 
 def dlg2reply(sub):
     "Implode a sub-dialog of note and code messages back into reply markdown"
-    parts = [mk_tr_details(_msg2tr(m), mx=None).strip() if m.msg_type==scode else m.content.strip() for m in sub.messages]
-    return '\n\n'.join(p for p in parts if p)
+    msgs = []
+    for m in sub.messages:
+        if m.msg_type!=scode: msgs.append(Msg('assistant', [Text(m.content)]))
+        else:
+            tr = _msg2tr(m)
+            msgs += [Msg('assistant', [ToolUse(id=tr.id, name=tr.name, arguments=tr.arguments)]), Msg('tool', [tr])]
+    return write_reply(msgs)
 
 def _inline_atts(m, text):
     "Rewrite `attachment:` refs in `text` as data URIs from `m`'s attachments, making the Markdown self-contained"
