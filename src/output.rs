@@ -39,7 +39,7 @@ fn tb_line(l: &str) -> Option<String> {
 /// the exception message and survives whole, as fastcore's `render_text` caps them.
 fn traceback(tb: &[Value], cap: bool) -> String {
     let chunks: Vec<String> = tb.iter().map(|c| strip_ansi(&text_str(c))).collect();
-    if !cap { return chunks.join("\n") }
+    if !cap { return chunks.join("\n"); }
     let Some((last, rest)) = chunks.split_last() else { return String::new(); };
     rest.iter().map(|c| c.split('\n').filter_map(tb_line).collect::<Vec<_>>().join("\n")).chain([last.clone()]).collect::<Vec<_>>().join("\n")
 }
@@ -96,7 +96,8 @@ pub fn render<'a>(outs: impl Iterator<Item = (&'a str, &'a Value)>, cap: bool, c
                 let data = o["data"].as_object();
                 if let Some((mime, value)) = data.and_then(|d| first_mime(d, &TEXT_MIMES)) {
                     let s = text_str(value);
-                    let s = if code && typ == "execute_result" && mime == "text/plain" && data.is_some_and(|d| d.len() == 1) { py_str(&s).unwrap_or(s) } else { s };
+                    let s =
+                        if code && typ == "execute_result" && mime == "text/plain" && data.is_some_and(|d| d.len() == 1) { py_str(&s).unwrap_or(s) } else { s };
                     texts.push((typ.into(), Some(mime), strip_ansi(&s)));
                 }
                 if let Some((mime, value)) = data.and_then(|d| first_mime(d, &IMG_MIMES)) { images.push((mime, text_str(value))) }
@@ -104,9 +105,10 @@ pub fn render<'a>(outs: impl Iterator<Item = (&'a str, &'a Value)>, cap: bool, c
             _ => {}
         }
     }
-    let mut nonempty: Vec<_> = texts.into_iter()
-        .map(|(tag, mime, body)| { let body = if mime.is_none() { strip_ansi(&clean_cli(&body)) } else { body }; (tag, mime, body) })
-        .filter(|(_, _, s)| !s.is_empty()).collect();
+    let mut nonempty: Vec<_> = texts.into_iter().map(|(tag, mime, body)| {
+        let body = if mime.is_none() { strip_ansi(&clean_cli(&body)) } else { body };
+        (tag, mime, body)
+    }).filter(|(_, _, s)| !s.is_empty()).collect();
     let md = matches!(nonempty.as_slice(), [(_, Some("text/markdown"), _)]);
     let bare = matches!(nonempty.as_slice(), [(_, None | Some("text/plain" | "text/markdown"), _)]);
     let text = if bare { nonempty.remove(0).2 } else {
@@ -125,27 +127,24 @@ fn py_str(s: &str) -> Option<String> {
     let hex = |cs: &mut std::str::Chars<'_>, n: usize| char::from_u32(u32::from_str_radix(&cs.take(n).collect::<String>(), 16).ok()?);
     let mut out = String::new();
     while let Some(c) = cs.next() {
-        if c == q { return None }
-        out.push(if c != '\\' { c } else { match cs.next()? {
-            'n' => '\n', 't' => '\t', 'r' => '\r', e @ ('\\' | '\'' | '"') => e,
-            'x' => hex(&mut cs, 2)?, 'u' => hex(&mut cs, 4)?, 'U' => hex(&mut cs, 8)?,
-            _ => return None,
-        }});
+        if c == q { return None; }
+        out.push(if c != '\\' { c } else {
+            match cs.next()? {
+                'n' => '\n', 't' => '\t', 'r' => '\r', e @ ('\\' | '\'' | '"') => e, 'x' => hex(&mut cs, 2)?, 'u' => hex(&mut cs, 4)?, 'U' => hex(&mut cs, 8)?,
+                _ => return None
+            }
+        });
     }
     Some(out)
 }
 
 /// Terminal output as it appears on screen: the last alternate screen, `\r` overwrites and `\b` backspaces
 fn clean_cli(s: &str) -> String {
-    let s = if s.contains("\x1b[?1049h") {
-        match s.rsplit_once("\x1b[?1049l") { Some((_, after)) => after, None => return String::new() }
-    } else { s };
+    let s = if s.contains("\x1b[?1049h") { match s.rsplit_once("\x1b[?1049l") { Some((_, after)) => after, None => return String::new() } } else { s };
     s.replace("\r\n", "\n").split('\n').map(|l| {
         let l = l.trim_end_matches('\r');
         let mut cs: Vec<char> = l.rsplit('\r').next().unwrap_or(l).chars().collect();
-        while let Some(i) = cs.iter().position(|&c| c == '\x08') {
-            if i == cs.len() - 1 { cs.truncate(i) } else { cs.drain(i.saturating_sub(1)..=i); }
-        }
+        while let Some(i) = cs.iter().position(|&c| c == '\x08') { if i == cs.len() - 1 { cs.truncate(i) } else { cs.drain(i.saturating_sub(1)..=i); } }
         cs.into_iter().collect::<String>()
     }).collect::<Vec<_>>().join("\n")
 }
@@ -168,9 +167,7 @@ pub struct ToolResult {
 
 /// Model-input parts for `images`, each a MIME type and its base64 data: an image's `<media>` tag and the image, or a
 /// `<media-unavailable>` note when a model with `caps` can't read it
-pub fn image_parts(images: &[(&str, String)], caps: &Caps) -> Vec<Value> {
-    images.iter().flat_map(|(mime, b64)| media::output_item(mime, b64, caps)).collect()
-}
+pub fn image_parts(images: &[(&str, String)], caps: &Caps) -> Vec<Value> { images.iter().flat_map(|(mime, b64)| media::output_item(mime, b64, caps)).collect() }
 
 /// A tool result from rendered output `text` and its `image_parts`. When `parts` holds no media, the result is the
 /// text, then each note. Otherwise it's the parts, then the text. `full` and `md` are `Rendered`'s flags.

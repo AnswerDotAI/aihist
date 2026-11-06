@@ -6,8 +6,8 @@ use pyo3::prelude::*;
 use serde_json::Value;
 use std::{path::PathBuf, sync::LazyLock};
 
-static RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(||
-    tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().expect("a history I/O runtime"));
+static RUNTIME: LazyLock<tokio::runtime::Runtime> =
+    LazyLock::new(|| tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().expect("a history I/O runtime"));
 static HTTP: LazyLock<reqwest::Client> = LazyLock::new(reqwest::Client::new);
 
 fn de<T: serde::de::DeserializeOwned>(s: &str) -> PyResult<T> { serde_json::from_str(s).map_err(|e| PyValueError::new_err(e.to_string())) }
@@ -82,7 +82,6 @@ fn references(nb: &str, prompt: &str, crafts: &str) -> PyResult<String> {
 #[pyfunction]
 fn media_refs(cell: &str) -> PyResult<Vec<String>> { Ok(cells::media_refs(&de(cell)?)) }
 
-
 /// Cell `cell` as the XML a model reads
 #[pyfunction]
 #[pyo3(signature = (cell, time=None))]
@@ -94,17 +93,11 @@ fn shown(cell: &str) -> PyResult<bool> { Ok(cells::shown(&de(cell)?)) }
 
 /// A prompt cell's reply as a model's history holds it; `None` for any other cell
 #[pyfunction]
-fn cell_reply(cell: &str) -> PyResult<Option<String>> {
-    let m = cells::msg(&de(cell)?);
-    Ok((m.typ == "prompt").then(|| cells::ai_fmt(&m.out)))
-}
+fn cell_reply(cell: &str) -> PyResult<Option<String>> { let m = cells::msg(&de(cell)?); Ok((m.typ == "prompt").then(|| cells::ai_fmt(&m.out))) }
 
 /// The sigil references in `cell`, as `{vars, cmds, tools}`
 #[pyfunction]
-fn cell_refs(cell: &str) -> PyResult<String> {
-    let r = cells::refs(&de(cell)?);
-    Ok(ser(serde_json::json!({"vars": r.vars, "cmds": r.cmds, "tools": r.tools})))
-}
+fn cell_refs(cell: &str) -> PyResult<String> { let r = cells::refs(&de(cell)?); Ok(ser(serde_json::json!({"vars": r.vars, "cmds": r.cmds, "tools": r.tools}))) }
 
 /// A prompt as the model reads it: the instruction to answer, then the prompt with its id `sid` and `time`
 #[pyfunction]

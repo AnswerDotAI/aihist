@@ -95,14 +95,16 @@ pub fn references(nb: &Value, prompt: &str, crafts: &[Craft]) -> Result<rgapi::C
     let cells = nb["cells"].as_array().ok_or("the notebook has no cells")?;
     let at = cells.iter().position(|c| c["id"] == prompt).ok_or_else(|| format!("no prompt cell {prompt}"))?;
     let mut refs = rgapi::CellRefs::default();
-    for c in cells[..at].iter().filter(|c| shown(c)).chain(cells.get(at))
-        .chain(crafts.iter().flat_map(|c| c.nb["cells"].as_array().into_iter().flatten())) {
+    for c in cells[..at].iter().filter(|c| shown(c)).chain(cells.get(at)).chain(crafts.iter().flat_map(|c| c.nb["cells"].as_array().into_iter().flatten())) {
         let r = rgapi::cell_refs(c);
         refs.vars.extend(r.vars);
         refs.cmds.extend(r.cmds);
         refs.tools.extend(r.tools);
     }
-    for names in [&mut refs.vars, &mut refs.cmds, &mut refs.tools] { names.sort(); names.dedup(); }
+    for names in [&mut refs.vars, &mut refs.cmds, &mut refs.tools] {
+        names.sort();
+        names.dedup();
+    }
     Ok(refs)
 }
 
@@ -113,7 +115,9 @@ pub fn reminder(s: &str) -> String { format!("<system-reminder>**NB**: {s}</syst
 pub fn warning(undef: &[String], tool_errors: &[String], craft_errors: &[String]) -> Option<String> {
     let list = |head: &str, xs: &[String]| format!("{head}\n\n- {}", xs.join("\n\n- "));
     let mut tags = vec![];
-    if !undef.is_empty() { tags.push(format!("<variable-errors>{}</variable-errors>", escape(&list("The following vars are undefined:", undef)))) }
+    if !undef.is_empty() {
+        tags.push(format!("<variable-errors>{}</variable-errors>", escape(&list("The following vars are undefined:", undef))))
+    }
     if !tool_errors.is_empty() { tags.push(format!("<tool-errors>{}</tool-errors>", escape(&list("Errors in tools:", tool_errors)))) }
     if !craft_errors.is_empty() { tags.push(format!("<context-warning>{}</context-warning>", escape(&craft_errors.join("\n")))) }
     (!tags.is_empty()).then(|| reminder(&format!("Notify the user of this if it might be relevant to their context: {}", tags.join("\n\n"))))
@@ -127,21 +131,22 @@ pub fn is_nameerr(r: &Value) -> bool { r["status"] != "ok" && r["ename"] == "Nam
 pub fn vars(records: &Map<String, Value>, caps: &Caps) -> (Vec<Value>, Vec<String>) {
     let (mut names, mut vs, mut imgs, mut undef) = (vec![], String::new(), vec![], vec![]);
     for (expr, r) in records {
-        if is_nameerr(r) { undef.push(expr.clone()); continue }
+        if is_nameerr(r) { undef.push(expr.clone()); continue; }
         names.push(format!("$`{expr}`"));
         let data = r["data"].as_object();
         if let Some((mime, v)) = data.and_then(|d| d.iter().find(|(m, _)| media::readable(m))) {
             imgs.extend(media::item("variable", expr, media::decode(&text_str(v)), Some(mime), caps));
             continue;
         }
-        let val = if r["status"] == "ok" {
-            data.and_then(|d| tokens::first_mime(d, &tokens::TEXT_MIMES)).map(|(_, v)| text_str(v)).unwrap_or_default()
-        } else { format!("{}: {}", text_str(&r["ename"]), text_str(&r["evalue"])) };
+        let val = if r["status"] == "ok" { data.and_then(|d| tokens::first_mime(d, &tokens::TEXT_MIMES)).map(|(_, v)| text_str(v)).unwrap_or_default() }
+        else { format!("{}: {}", text_str(&r["ename"]), text_str(&r["evalue"])) };
         let typ = r["metadata"]["type"].as_str().map(|t| xml_attr("type", t)).unwrap_or_default();
         vs += &format!("<variable{}{typ}>{val}</variable>", xml_attr("name", expr));
     }
     let mut parts = vec![];
-    if !vs.is_empty() { parts.push(text(format!("<variables>The 'variables' section provides values of: {}{vs}</variables>", names.join(", ")))) }
+    if !vs.is_empty() {
+        parts.push(text(format!("<variables>The 'variables' section provides values of: {}{vs}</variables>", names.join(", "))))
+    }
     parts.extend(imgs);
     (parts, undef)
 }
@@ -156,7 +161,7 @@ fn fit(hist: Vec<Candidate>, budget: u64) -> (Vec<usize>, usize) {
     let mut start = hist.len();
     for (i, e) in hist.iter().enumerate().rev() {
         if !e.pinned { used += e.tokens }
-        if used > budget { break }
+        if used > budget { break; }
         if e.boundary { start = i }
     }
     let n = hist.len();
@@ -236,7 +241,7 @@ pub async fn build(p: &Prompt, ctx: &media::Context<'_>) -> Result<Vec<Value>, S
         let large = m.content.chars().count() + m.out.chars().count() > 20_000;
         boundary |= i % 10 == 0 || large || after_large;
         after_large = large;
-        if !shown(c) { return None }
+        if !shown(c) { return None; }
         let e = Candidate { index: i, boundary, pinned: truthy(&c["metadata"]["pinned"]), tokens: scaled(tokens::total(c, stored_atts(&p.nb, c))) };
         boundary = false;
         Some(e)
@@ -247,7 +252,10 @@ pub async fn build(p: &Prompt, ctx: &media::Context<'_>) -> Result<Vec<Value>, S
     let mut hist = vec![];
     for i in selected { hist.push(entry(&p.nb, &all[i], caps, time(&all[i]), ctx).await); }
     if dropped > 0 {
-        last.insert(0, Entry::text(reminder(&format!("Notify the user if relevant: {dropped} older non-pinned dialog message(s) were omitted to fit the model context."))));
+        last.insert(
+            0,
+            Entry::text(reminder(&format!("Notify the user if relevant: {dropped} older non-pinned dialog message(s) were omitted to fit the model context."))),
+        );
     }
     let mut input = turns(pre.into_iter().chain(hist).chain(last).map(|e| e.turn).collect());
     model_call_ids(&mut input);

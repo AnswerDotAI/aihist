@@ -7,11 +7,7 @@ use std::path::Path;
 use crate::Caps;
 
 /// The HTTP client, notebook filename and optional gateway root used to read linked media.
-pub struct Context<'a> {
-    pub http: &'a reqwest::Client,
-    pub root: Option<&'a Path>,
-    pub path: &'a Path,
-}
+pub struct Context<'a> { pub http: &'a reqwest::Client, pub root: Option<&'a Path>, pub path: &'a Path }
 
 /// Read a base64 data URL, HTTP(S) URL or notebook-relative file. A gateway root enables its `/static/` namespace
 /// and checked filesystem access; without one, ordinary absolute paths retain their meaning.
@@ -22,8 +18,7 @@ pub async fn load(reference: &str, ctx: &Context<'_>) -> Result<Vec<u8>, String>
         return decode(data);
     }
     if reference.starts_with("http://") || reference.starts_with("https://") {
-        let res = ctx.http.get(reference).send().await.map_err(|e| e.to_string())?
-            .error_for_status().map_err(|e| e.to_string())?;
+        let res = ctx.http.get(reference).send().await.map_err(|e| e.to_string())?.error_for_status().map_err(|e| e.to_string())?;
         return res.bytes().await.map(|b| b.to_vec()).map_err(|e| e.to_string());
     }
     let raw = reference.split('?').next().unwrap_or(reference);
@@ -46,7 +41,8 @@ pub const IM_MAX: u32 = 768 * 768;
 /// Raster MIME types that vision APIs accept, in fastcore's `IMG_MIMES` order. `resize` limits them to `IM_MAX`.
 pub const IMG_MIMES: [&str; 3] = ["image/jpeg", "image/png", "image/webp"];
 /// The note for media of a type the model can't read, with `{mime}` standing for the type
-pub const UNSUPPORTED: &str = "An unsupported media type was included in the context: {mime}. Please instruct the user to switch to a model that supports this media type.";
+pub const UNSUPPORTED: &str =
+    "An unsupported media type was included in the context: {mime}. Please instruct the user to switch to a model that supports this media type.";
 
 /// Whether media of type `mime` can go into model input: the raster images in `IMG_MIMES`, PDF, audio and video
 pub fn readable(mime: &str) -> bool { IMG_MIMES.contains(&mime) || mime == "application/pdf" || mime.starts_with("audio/") || mime.starts_with("video/") }
@@ -57,13 +53,14 @@ pub fn detect_mime(d: &[u8]) -> Option<&'static str> {
     let sub = |sig: &[u8]| d.get(8..8 + sig.len()) == Some(sig);
     Some(if at(0, b"%PDF") { "application/pdf" }
     else if at(0, b"RIFF") {
-        if sub(b"WAVE") { "audio/wav" } else if sub(b"AVI ") { "video/avi" } else if sub(b"WEBP") { "image/webp" } else { return None }
-    }
-    else if at(0, b"ID3") || at(0, b"\xff\xfb") || at(0, b"\xff\xf3") { "audio/mp3" }
-    else if at(0, b"FORM") { if sub(b"AIFF") { "audio/aiff" } else { return None } }
-    else if at(0, b"OggS") { "audio/ogg" }
+        if sub(b"WAVE") { "audio/wav" } else if sub(b"AVI ") { "video/avi" } else if sub(b"WEBP") { "image/webp" } else { return None; }
+    } else if at(0, b"ID3") || at(0, b"\xff\xfb") || at(0, b"\xff\xf3") { "audio/mp3" }
+    else if at(0, b"FORM") {
+        if sub(b"AIFF") { "audio/aiff" } else { return None; }
+    } else if at(0, b"OggS") { "audio/ogg" }
     else if at(0, b"fLaC") { "audio/flac" }
-    else if at(4, b"ftyp") { if sub(b"3gp") { "video/3gpp" } else { "video/mp4" } }
+    else if at(4, b"ftyp") { if sub(b"3gp") { "video/3gpp" }
+    else { "video/mp4" } }
     else if at(0, b"\x1a\x45\xdf") { "video/webm" }
     else if at(0, b"FLV") { "video/x-flv" }
     else if at(0, b"\x30\x26\xb2\x75") { "video/wmv" }
@@ -73,7 +70,7 @@ pub fn detect_mime(d: &[u8]) -> Option<&'static str> {
     else if at(0, b"GIF87a") || at(0, b"GIF89a") { "image/gif" }
     else if at(0, b"BM") { "image/bmp" }
     else if at(0, b"II*\0") || at(0, b"MM\0*") { "image/tiff" }
-    else { return None })
+    else { return None; })
 }
 
 /// Can a model with `caps` read media of type `mime`? `caps.input_modalities` lists the kinds it reads besides text:
@@ -85,10 +82,10 @@ pub fn supported(mime: &str, caps: &Caps) -> bool {
 
 /// `data` with its area limited to `max` pixels, in the same format. Other media are unchanged.
 pub fn resize(data: Vec<u8>, mime: &str, max: u32) -> Result<Vec<u8>, String> {
-    if !IMG_MIMES.contains(&mime) { return Ok(data) }
+    if !IMG_MIMES.contains(&mime) { return Ok(data); }
     let img = image::load_from_memory(&data).map_err(|e| e.to_string())?;
     let (w, h) = (img.width() as f64, img.height() as f64);
-    if w * h <= max as f64 { return Ok(data) }
+    if w * h <= max as f64 { return Ok(data); }
     let s = (max as f64 / (w * h)).sqrt();
     let fmt = image::ImageFormat::from_mime_type(mime).ok_or_else(|| format!("unknown image format {mime}"))?;
     let mut out = std::io::Cursor::new(Vec::new());
@@ -106,22 +103,19 @@ pub fn xml_attr(name: &str, value: &str) -> String {
 }
 
 /// The `<media>` tag that names the media part after it
-pub fn tag(typ: &str, id: &str, mime: &str) -> String {
-    format!("<media{}{}{}></media>", xml_attr("id", id), xml_attr("type", typ), xml_attr("mime", mime))
-}
+pub fn tag(typ: &str, id: &str, mime: &str) -> String { format!("<media{}{}{}></media>", xml_attr("id", id), xml_attr("type", typ), xml_attr("mime", mime)) }
 
 /// A `<media-unavailable>` tag, telling the model it can't see this media
 pub fn unavailable(typ: &str, id: &str, reason: &str, mime: Option<&str>) -> String {
     let mime = mime.map(|m| xml_attr("mime", m)).unwrap_or_default();
-    format!("<media-unavailable{}{}{}{mime}>The user included this media, but it was not available to the AI. Tell the user that you cannot see it.</media-unavailable>",
-        xml_attr("id", id), xml_attr("type", typ), xml_attr("reason", reason))
+    format!(
+        "<media-unavailable{}{}{}{mime}>The user included this media, but it was not available to the AI. Tell the user that you cannot see it.</media-unavailable>",
+        xml_attr("id", id), xml_attr("type", typ), xml_attr("reason", reason)
+    )
 }
 
 /// A short id for output image `data`: the first 8 characters of its base32 MD5
-pub fn img_id(data: &[u8]) -> String {
-    use md5::{Digest, Md5};
-    data_encoding::BASE32.encode(&Md5::digest(data))[..8].into()
-}
+pub fn img_id(data: &[u8]) -> String { use md5::{Digest, Md5}; data_encoding::BASE32.encode(&Md5::digest(data))[..8].into() }
 
 /// Model-input parts for an output image given as notebook base64. The image's id is its `img_id`, or "unknown" when the
 /// base64 doesn't decode.
@@ -138,8 +132,8 @@ pub fn text(s: impl Into<String>) -> Value { json!({"type": "input_text", "text"
 /// a text part's text, or a compact tag such as `<media input_image image/png>`
 pub fn ctext(p: &Value) -> String {
     let typ = p["type"].as_str().unwrap_or_default();
-    if typ == "input_text" { return p["text"].as_str().unwrap_or_default().into() }
-    if let Some(mime) = p["mime"].as_str() { return format!("<media {typ} {mime}>") }
+    if typ == "input_text" { return p["text"].as_str().unwrap_or_default().into(); }
+    if let Some(mime) = p["mime"].as_str() { return format!("<media {typ} {mime}>"); }
     let url = ["image_url", "video_url", "file_data"].iter().find_map(|k| p[*k].as_str()).unwrap_or_default();
     match url.strip_prefix("data:").and_then(|u| u.split_once(';')) { Some((mime, _)) => format!("<media {typ} {mime}>"), None => format!("<media {typ}>") }
 }
@@ -151,7 +145,9 @@ pub fn part(mime: &str, data: &[u8]) -> Value {
         Some("image") => json!({"type": "input_image", "image_url": url}),
         Some("video") => json!({"type": "input_video", "video_url": url}),
         Some("audio") => json!({"type": "input_audio", "text": url, "mime": mime}),
-        _ => json!({"type": "input_file", "file_data": url, "filename": format!("upload.{}", mime.rsplit('/').next().unwrap_or_default())}),
+        _ => {
+            json!({"type": "input_file", "file_data": url, "filename": format!("upload.{}", mime.rsplit('/').next().unwrap_or_default())})
+        }
     }
 }
 
@@ -168,12 +164,9 @@ pub fn item(typ: &str, id: &str, data: Result<Vec<u8>, String>, mime: Option<&st
     let res = data.and_then(|data| {
         let mime = mime.or_else(|| detect_mime(&data)).ok_or("unsupported or unknown media type")?;
         known = Some(mime);
-        if !supported(mime, caps) {
-            return Err(UNSUPPORTED.replace("{mime}", mime));
-        }
+        if !supported(mime, caps) { return Err(UNSUPPORTED.replace("{mime}", mime)); }
         let data = resize(data, mime, IM_MAX)?;
         Ok(vec![text(tag(typ, id, mime)), part(mime, &data)])
     });
     res.unwrap_or_else(|e| vec![text(unavailable(typ, id, &e, known))])
 }
-

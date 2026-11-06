@@ -17,14 +17,8 @@ pub const INTERRUPTED: &str = "*[Response interrupted]*";
 /// One tool call and its result, as a tool block stores them
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Tool {
-    pub id: String,
-    pub name: String,
-    pub args: Value,
-    pub result: Value,
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub server: bool,
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub md: bool,
+    pub id: String, pub name: String, pub args: Value, pub result: Value, #[serde(default, skip_serializing_if = "std::ops::Not::not")] pub server: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")] pub md: bool
 }
 
 /// A piece of a stored reply: prose, or a tool call with its result
@@ -56,7 +50,7 @@ pub fn fenced_blocks(s: &str) -> Vec<(&str, &str, usize, usize)> {
 pub fn strip_blocks(s: &str, infos: &[&str]) -> String {
     let (mut out, mut pos) = (String::new(), 0);
     for (i, _, start, end) in fenced_blocks(s) {
-        if !infos.contains(&i) { continue }
+        if !infos.contains(&i) { continue; }
         out.push_str(&s[pos..start]);
         pos = end;
     }
@@ -77,8 +71,8 @@ fn strip_think(mut s: String) -> String {
 pub fn segments(s: &str) -> Vec<(&str, Option<Value>)> {
     let (mut res, mut pos) = (vec![], 0);
     for (info, body, start, end) in fenced_blocks(s) {
-        if info != TOOL_INFO { continue }
-        let Ok(d) = serde_json::from_str::<Value>(body) else { continue };
+        if info != TOOL_INFO { continue; }
+        let Ok(d) = serde_json::from_str::<Value>(body) else { continue; };
         res.push((&s[pos..start], Some(d)));
         pos = end;
     }
@@ -89,9 +83,9 @@ pub fn segments(s: &str) -> Vec<(&str, Option<Value>)> {
 /// `reply` with call `id`'s stored result replaced, subject to the tool-text ceiling. Every other byte stays as it was.
 pub fn set_result(reply: &str, id: &str, result: &str) -> String {
     for (info, body, start, end) in fenced_blocks(reply) {
-        if info != TOOL_INFO { continue }
-        let Ok(mut d) = serde_json::from_str::<Value>(body) else { continue };
-        if d["id"] != id { continue }
+        if info != TOOL_INFO { continue; }
+        let Ok(mut d) = serde_json::from_str::<Value>(body) else { continue; };
+        if d["id"] != id { continue; }
         d["result"] = limit_text(result).into();
         let nl = if reply[..end].ends_with('\n') { "\n" } else { "" };
         return format!("{}{}{nl}{}", &reply[..start], fenced(&serde_json::to_string_pretty(&d).expect("JSON serializes"), TOOL_INFO), &reply[end..]);
@@ -102,14 +96,8 @@ pub fn set_result(reply: &str, id: &str, result: &str) -> String {
 /// The tool call in a tool block's JSON. A block without a string `id` holds none.
 fn tool(d: &Value) -> Option<Tool> {
     let flag = |k: &str| d[k].as_bool() == Some(true);
-    Some(Tool {
-        id: d["id"].as_str()?.into(),
-        name: d["name"].as_str().unwrap_or_default().into(),
-        args: if d["args"].is_object() { d["args"].clone() } else { json!({}) },
-        result: d["result"].clone(),
-        server: flag("server"),
-        md: flag("md"),
-    })
+    Some(Tool { id: d["id"].as_str()?.into(), name: d["name"].as_str().unwrap_or_default().into(),
+        args: if d["args"].is_object() { d["args"].clone() } else { json!({}) }, result: d["result"].clone(), server: flag("server"), md: flag("md") })
 }
 
 /// `t` as a `Text` block, unless it's only whitespace
@@ -148,7 +136,8 @@ pub fn messages(blocks: &[Block]) -> Vec<HistoryMsg> {
                 asst.push(Part::Text { text: Some(t.clone()) });
             }
             Block::Tool(t) => {
-                asst.push(Part::ToolUse(Call { id: Some(t.id.clone()), name: t.name.clone(), arguments: t.args.as_object().cloned().unwrap_or_default(), ..Default::default() }));
+                asst.push(Part::ToolUse(Call { id: Some(t.id.clone()), name: t.name.clone(), arguments: t.args.as_object().cloned().unwrap_or_default(),
+                    ..Default::default() }));
                 let output = match &t.result { Value::String(s) => s.clone(), v => v.to_string() };
                 outs.push(Part::ToolResult(Call { id: Some(t.id.clone()), name: t.name.clone(), text: Some(output), md: t.md, ..Default::default() }));
             }
@@ -168,7 +157,9 @@ pub fn items(blocks: &[Block]) -> Vec<Value> {
         for p in m.content {
             match p {
                 Part::Text { text: Some(t) } => res.push(assistant(&t)),
-                Part::ToolUse(c) => res.push(json!({"type": "function_call", "call_id": c.id, "name": c.name, "arguments": Value::Object(c.arguments).to_string()})),
+                Part::ToolUse(c) => {
+                    res.push(json!({"type": "function_call", "call_id": c.id, "name": c.name, "arguments": Value::Object(c.arguments).to_string()}))
+                }
                 Part::ToolResult(c) => res.push(json!({"type": "function_call_output", "call_id": c.id, "output": c.text.unwrap_or_default()})),
                 _ => {}
             }
@@ -186,14 +177,7 @@ fn limit_text(text: &str) -> String { crate::output::keep_ends(text.into(), 0, c
 /// Other part types, such as thinking, aren't stored.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum Part {
-    Text { text: Option<String> },
-    Refusal { text: Option<String> },
-    ToolUse(Call),
-    ToolResult(Call),
-    #[serde(other)]
-    Other,
-}
+pub enum Part { Text { text: Option<String> }, Refusal { text: Option<String> }, ToolUse(Call), ToolResult(Call), #[serde(other)] Other }
 
 /// A tool call or its result. A server call carries its result in `text`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -247,7 +231,7 @@ impl Usage {
     /// The `json {.usage}` block that ends a stored reply: the fields that aren't zero or empty, and no block at all
     /// without tokens
     pub fn block(&self) -> String {
-        if self.total_tokens == 0 { return String::new() }
+        if self.total_tokens == 0 { return String::new(); }
         let Value::Object(d) = json!(self) else { unreachable!() };
         let d: Map<String, Value> = d.into_iter().filter(|(_, v)| !(*v == "" || *v == 0.0)).collect();
         format!("\n\n{}\n", fenced(&serde_json::to_string(&d).expect("JSON serializes"), USAGE_INFO))
@@ -257,11 +241,7 @@ impl Usage {
 /// A turn's reply as it streams in. Each method returns the text to show on the stream, and `finish` gives the reply
 /// to store.
 #[derive(Debug, Default)]
-pub struct Reply {
-    pub parts: Vec<Part>,
-    pub usage: Usage,
-    last_thinking: Option<bool>,
-}
+pub struct Reply { pub parts: Vec<Part>, pub usage: Usage, last_thinking: Option<bool> }
 
 impl Reply {
     /// A blank line when the stream crosses between thinking and other text
@@ -273,10 +253,7 @@ impl Reply {
 
     /// Add text the model wrote
     pub fn text(&mut self, delta: &str) -> String {
-        match self.parts.last_mut() {
-            Some(Part::Text { text: Some(t) }) => t.push_str(delta),
-            _ => self.parts.push(Part::Text { text: Some(delta.into()) }),
-        }
+        match self.parts.last_mut() { Some(Part::Text { text: Some(t) }) => t.push_str(delta), _ => self.parts.push(Part::Text { text: Some(delta.into()) }) }
         format!("{}{delta}", self.sep(false))
     }
 
@@ -294,8 +271,7 @@ impl Reply {
     /// Add a client call's result, returning its completed block for the stream
     pub fn result(&mut self, r: Call) -> String {
         let block = self.parts.iter().rev().find_map(|p| match p {
-            Part::ToolUse(c) if c.id == r.id && !c.server => Some(write(&[p.clone(), Part::ToolResult(r.clone())], None)),
-            _ => None,
+            Part::ToolUse(c) if c.id == r.id && !c.server => Some(write(&[p.clone(), Part::ToolResult(r.clone())], None)), _ => None
         }).unwrap_or_default();
         self.parts.push(Part::ToolResult(r));
         if block.is_empty() { block } else { format!("\n\n{block}\n") }
@@ -304,7 +280,7 @@ impl Reply {
     /// The reply to store, with its usage block when `usage`. When `note` explains why the turn ended early, the reply
     /// so far and the note, without usage.
     pub fn finish(&self, note: Option<&str>, usage: bool) -> String {
-        let Some(note) = note else { return write(&self.parts, usage.then_some(&self.usage)) };
+        let Some(note) = note else { return write(&self.parts, usage.then_some(&self.usage)); };
         let partial = write(&self.parts, None);
         if partial.is_empty() { note.into() } else { format!("{partial}\n\n{note}") }
     }
@@ -317,7 +293,9 @@ pub fn write(parts: &[Part], usage: Option<&Usage>) -> String {
     for p in parts {
         match p {
             Part::Text { text } | Part::Refusal { text } => out.push(text.as_deref().unwrap_or_default().trim().into()),
-            Part::ToolUse(c) if c.server => out.push(tool_block(c, &c.arguments, c.text.as_deref().filter(|t| !t.is_empty()).unwrap_or("Server tool call executed."))),
+            Part::ToolUse(c) if c.server => {
+                out.push(tool_block(c, &c.arguments, c.text.as_deref().filter(|t| !t.is_empty()).unwrap_or("Server tool call executed.")))
+            }
             Part::ToolUse(c) => match open.iter().position(|o| o.id == c.id) { Some(i) => open[i] = c, None => open.push(c) },
             Part::ToolResult(r) => {
                 let args = open.iter().position(|o| o.id == r.id).map(|i| &open.remove(i).arguments);
@@ -333,14 +311,15 @@ pub fn write(parts: &[Part], usage: Option<&Usage>) -> String {
 
 /// A prompt cell's outputs holding `reply`, as aidialog's `prompt_output` makes them: none for an empty reply
 pub fn output(reply: &str) -> Vec<Value> {
-    if reply.is_empty() { return vec![] }
+    if reply.is_empty() { return vec![]; }
     vec![json!({"output_type": "display_data", "metadata": {}, "data": {"text/markdown": reply}})]
 }
 
 /// The `json {.tool}` block for call `c` with `args` and result `text`, as aidialog's `mk_tr_details` writes it
 fn tool_block(c: &Call, args: &Map<String, Value>, text: &str) -> String {
-    let args: Map<String, Value> = args.iter()
-        .map(|(k, v)| (k.clone(), match v { Value::String(s) => limit_text(&trunc_str(s, MX * 5, 10, true)).into(), v => v.clone() })).collect();
+    let args: Map<String, Value> = args.iter().map(|(k, v)| {
+        (k.clone(), match v { Value::String(s) => limit_text(&trunc_str(s, MX * 5, 10, true)).into(), v => v.clone() })
+    }).collect();
     let text = if c.full { text.to_string() } else { trunc_str(text, MX, 10, true) };
     let mut d = json!({"id": c.id, "name": c.name, "args": args, "result": limit_text(&text)});
     if c.server { d["server"] = true.into() }
@@ -371,11 +350,8 @@ fn short(v: &Value) -> String {
 /// the result goes inside a `<TRUNCATED>` tag.
 fn trunc_str(s: &str, mx: usize, skip: usize, tag: bool) -> String {
     let mut cs: Vec<char> = s.trim_end().chars().collect();
-    if cs.len() > 2 && cs[0] == '𝍁' && cs[cs.len() - 1] == '𝍁' {
-        cs = cs[1..cs.len() - 1].to_vec();
-        if tag { return cs.into_iter().collect() }
-    }
-    if cs.len() <= mx { return cs.into_iter().collect() }
+    if cs.len() > 2 && cs[0] == '𝍁' && cs[cs.len() - 1] == '𝍁' { cs = cs[1..cs.len() - 1].to_vec(); if tag { return cs.into_iter().collect(); } }
+    if cs.len() <= mx { return cs.into_iter().collect(); }
     let mut cut: String = cs[skip..mx - skip].iter().collect();
     let i = cut.rfind(' ').map_or(0, |i| i + 1);
     if cut[i..].chars().count() > 150 { cut = format!("{}{}", &cut[..i], cut[i..].chars().take(5).collect::<String>()) }
@@ -387,8 +363,4 @@ fn trunc_str(s: &str, mx: usize, skip: usize, tag: bool) -> String {
 fn fence(text: &str, min: usize) -> String { "`".repeat(text.split(|c| c != '`').map(str::len).max().unwrap_or(0).max(min - 1) + 1) }
 
 /// `text` in a fence of at least three backticks, as fastcore's `fenced` writes it
-fn fenced(text: &str, info: &str) -> String {
-    let fence = fence(text, 3);
-    format!("{fence}{info}\n{}\n{fence}", text.trim_end_matches('\n'))
-}
-
+fn fenced(text: &str, info: &str) -> String { let fence = fence(text, 3); format!("{fence}{info}\n{}\n{fence}", text.trim_end_matches('\n')) }

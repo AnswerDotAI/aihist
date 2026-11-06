@@ -16,15 +16,13 @@ pub use rgapi::cell_refs as refs;
 static ATT_REF: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"!\[[^\]]*\]\(attachment:([^)]+)\)|<!-- last_output:([0-9a-f-]{36}) -->").expect("a valid regex"));
 
-static MEDIA_REF: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"!\[[^\]]*\]\(([^)#]+)#ai\)").expect("a valid regex"));
+static MEDIA_REF: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"!\[[^\]]*\]\(([^)#]+)#ai\)").expect("a valid regex"));
 
 /// External media links marked #ai, in source order, from a note or prompt's content.
 pub fn media_refs(cell: &Value) -> Vec<String> {
     if cell["cell_type"] != "markdown" && !is_prompt(cell) { return vec![]; }
     MEDIA_REF.captures_iter(&content(cell)).map(|c| c[1].to_owned()).filter(|s| !s.starts_with("attachment:")).collect()
 }
-
 
 /// A cell's attachments: its own, or for a code cell, the notebook's `metadata.attachments` entry for its id. nbformat
 /// allows attachments only on markdown and raw cells, so aidialog's notebook format keeps a code cell's there.
@@ -41,27 +39,24 @@ pub fn text_str(v: &Value) -> String {
 /// Python's truthiness, for metadata flags such as `skipped: 1`
 pub fn truthy(v: &Value) -> bool {
     match v {
-        Value::Null => false,
-        Value::Bool(b) => *b,
-        Value::Number(n) => n.as_f64() != Some(0.0),
-        Value::String(s) => !s.is_empty(),
-        Value::Array(a) => !a.is_empty(),
-        Value::Object(o) => !o.is_empty(),
+        Value::Null => false, Value::Bool(b) => *b, Value::Number(n) => n.as_f64() != Some(0.0), Value::String(s) => !s.is_empty(),
+        Value::Array(a) => !a.is_empty(), Value::Object(o) => !o.is_empty()
     }
 }
 
 /// Whether `cell` is a prompt: its metadata has a truthy `solveit_ai`
 pub fn is_prompt(cell: &Value) -> bool { truthy(&cell["metadata"]["solveit_ai"]) }
 
+/// The dialog message type, without rendering its content or output.
+pub fn kind(cell: &Value) -> &'static str {
+    if is_prompt(cell) { "prompt" } else { match cell["cell_type"].as_str() { Some("markdown") => "note", Some("raw") => "raw", _ => "code" } }
+}
+
 /// A cell's input text, without a prompt's `%%prompt` first line.
 pub fn content(cell: &Value) -> String {
     let src = text_str(&cell["source"]);
     if !is_prompt(cell) { return src; }
-    match src.split_once('\n') {
-        Some((h, rest)) if h.trim() == "%%prompt" => rest.into(),
-        None if src.trim() == "%%prompt" => String::new(),
-        _ => src,
-    }
+    match src.split_once('\n') { Some((h, rest)) if h.trim() == "%%prompt" => rest.into(), None if src.trim() == "%%prompt" => String::new(), _ => src }
 }
 
 /// A cell as a dialog message
@@ -79,9 +74,8 @@ pub struct Msg {
 pub fn msg(cell: &Value) -> Msg {
     let src = content(cell);
     let outs = cell["outputs"].as_array().map(Vec::as_slice).unwrap_or_default();
-    let kind = cell["cell_type"].as_str().unwrap_or_default();
+    let typ = kind(cell);
     if !is_prompt(cell) {
-        let typ = match kind { "markdown" => "note", "raw" => "raw", _ => "code" };
         let out = if typ != "code" { String::new() } else { output::render(output::stored(outs), false, true).text };
         return Msg { typ, content: src, out };
     }
@@ -108,16 +102,12 @@ pub fn envelope(task: &str, sid: &str, time: Option<&str>) -> String {
 /// cell's id, its `time`, its nbdev metadata directives, and any output
 pub fn xml(cell: &Value, m: &Msg, time: Option<&str>) -> String {
     let id = cell["id"].as_str().unwrap_or_default();
-    if m.typ == "prompt" { return envelope(&m.content, id, time) }
+    if m.typ == "prompt" { return envelope(&m.content, id, time); }
     let tag = if m.typ == "note" { "markdown" } else { m.typ };
     let mut attrs = if id.is_empty() { String::new() } else { xml_attr("id", id) };
     if let Some(t) = time { attrs += &xml_attr("time", t) }
     for (k, v) in cell["metadata"]["nbdev"].as_object().into_iter().flatten() {
-        match v.as_str() {
-            Some("true" | "") => attrs += &format!(" {k}"),
-            Some(v) => attrs += &xml_attr(k, v),
-            None => {}
-        }
+        match v.as_str() { Some("true" | "") => attrs += &format!(" {k}"), Some(v) => attrs += &xml_attr(k, v), None => {} }
     }
     let out = if m.out.is_empty() { String::new() } else { format!("<out>{}</out>", m.out) };
     format!("<{tag}{attrs}>{}{out}</{tag}>", m.content)
@@ -127,18 +117,17 @@ pub fn xml(cell: &Value, m: &Msg, time: Option<&str>) -> String {
 pub async fn media(nb: &Value, cell: &Value, caps: &Caps, ctx: &media::Context<'_>) -> Vec<Value> {
     let source = content(cell);
     let refs: HashSet<&str> =
-        ATT_REF.captures_iter(&source).filter_map(|c| c.get(1).or_else(|| c.get(2)))
-            .map(|g| g.as_str().strip_suffix("#ai").unwrap_or(g.as_str())).collect();
+        ATT_REF.captures_iter(&source).filter_map(|c| c.get(1).or_else(|| c.get(2))).map(|g| g.as_str().strip_suffix("#ai").unwrap_or(g.as_str())).collect();
     let mut res = vec![];
     for (id, a) in stored_atts(nb, cell).into_iter().flatten().filter(|(id, _)| refs.contains(id.as_str())) {
-        let data = a.as_object().and_then(|o| o.values().next()).map(text_str)
-            .ok_or_else(|| "media data unavailable".to_string()).and_then(|s| media::decode(&s));
+        let data =
+            a.as_object().and_then(|o| o.values().next()).map(text_str).ok_or_else(|| "media data unavailable".to_string()).and_then(|s| media::decode(&s));
         res.extend(media::item("content", id, data, None, caps));
     }
     for reference in media_refs(cell) { res.extend(media::item("content", &reference, media::load(&reference, ctx).await, None, caps)); }
     if cell["cell_type"] == "code" && !is_prompt(cell) {
         for d in cell["outputs"].as_array().into_iter().flatten().filter_map(|o| o["data"].as_object()) {
-            let Some((mime, v)) = tokens::first_mime(d, &IMG_MIMES) else { continue };
+            let Some((mime, v)) = tokens::first_mime(d, &IMG_MIMES) else { continue; };
             res.extend(media::output_item(mime, &text_str(v), caps));
         }
     }
@@ -159,4 +148,3 @@ pub async fn parts(nb: &Value, cell: &Value, caps: &Caps, time: Option<&str>, ct
     res.push(text(xml(cell, &m, time)));
     res
 }
-
