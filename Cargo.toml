@@ -23,6 +23,7 @@ data-encoding = "2"
 flate2 = "1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
 md-5 = "0.10"
+mime_guess = "2"
 percent-encoding = "2"
 regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }

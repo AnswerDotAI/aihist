@@ -1,4 +1,4 @@
-//! Media in model input: MIME detection, `<media>` tags, resizing images, and Responses content parts.
+//! Files in model input: MIME detection, text documents, media tags, resizing images, and Responses content parts.
 
 use base64::Engine;
 use serde_json::{Value, json};
@@ -46,6 +46,19 @@ pub const UNSUPPORTED: &str =
 
 /// Whether media of type `mime` can go into model input: the raster images in `IMG_MIMES`, PDF, audio and video
 pub fn readable(mime: &str) -> bool { IMG_MIMES.contains(&mime) || mime == "application/pdf" || mime.starts_with("audio/") || mime.starts_with("video/") }
+
+/// Text document MIME types; unknown binary formats are not decoded as text.
+pub fn text_file(mime: &str) -> bool {
+    mime.starts_with("text/") || matches!(mime, "application/json" | "application/toml" | "application/yaml" | "application/x-yaml" | "application/xml" | "application/javascript" | "application/sql")
+        || mime.ends_with("+json") || mime.ends_with("+xml")
+}
+
+fn file_mime(reference: &str) -> Option<&str> {
+    if let Some(data) = reference.strip_prefix("data:") { return data.split_once(';').map(|(mime, _)| mime); }
+    let path = reference.split('?').next().unwrap_or(reference);
+    if Path::new(path).extension().and_then(|ext| ext.to_str()).is_some_and(|ext| ext.eq_ignore_ascii_case("qmd")) { Some("text/markdown") }
+    else { mime_guess::from_path(path).first_raw() }
+}
 
 /// The MIME type of `d` from its leading bytes: PDF, common audio and video formats, and images.
 pub fn detect_mime(d: &[u8]) -> Option<&'static str> {
@@ -162,8 +175,13 @@ pub fn decode(s: &str) -> Result<Vec<u8>, String> {
 pub fn item(typ: &str, id: &str, data: Result<Vec<u8>, String>, mime: Option<&str>, caps: &Caps) -> Vec<Value> {
     let mut known = mime;
     let res = data.and_then(|data| {
-        let mime = mime.or_else(|| detect_mime(&data)).ok_or("unsupported or unknown media type")?;
+        let mime = mime.or_else(|| detect_mime(&data)).or_else(|| file_mime(id)).ok_or("unsupported or unknown media type")?;
         known = Some(mime);
+        if text_file(mime) {
+            let source = std::str::from_utf8(&data).map_err(|_| "text file is not valid UTF-8")?;
+            if source.len() > crate::output::TEXT_MAX { return Err("text file exceeds the input text limit; read selected sections with a tool".into()); }
+            return Ok(vec![text(format!("<file{}{}>{}</file>", xml_attr("name", id), xml_attr("mime", mime), escape(source)))]);
+        }
         if !supported(mime, caps) { return Err(UNSUPPORTED.replace("{mime}", mime)); }
         let data = resize(data, mime, IM_MAX)?;
         Ok(vec![text(tag(typ, id, mime)), part(mime, &data)])

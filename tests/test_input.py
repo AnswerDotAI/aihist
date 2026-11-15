@@ -34,7 +34,7 @@ def fixture():
     d.mk_message('And the area?', msg_type='prompt')
     return nb(d)
 
-def test_dialog_cells():
+def test_dialog_cells(tmp_path):
     dlg = fixture()
     items = build(dlg, last_cell(dlg), vision)
     sent = json.dumps(items)
@@ -58,6 +58,13 @@ def test_dialog_cells():
     dlg['cells'][2].update(cell_type='markdown', source=f'![](data:image/png;base64,{base64.b64encode(png).decode()}#ai)')
     assert json.dumps(build(dlg, last_cell(dlg), vision)).count('"input_image"')==3
     assert '"input_image"' not in json.dumps(build(dlg, last_cell(dlg), dict(vision, max_input_tokens=1)))
+
+    # Uploaded text stays text context, including formats that have no media magic bytes.
+    for name in ('brief.qmd', 'pyproject.toml'):
+        (tmp_path/name).write_text('Use <this> & that.')
+        dlg['cells'][2]['source'] = f'![]({name}#ai){{.attachment}}'
+        sent = json.dumps(build(dlg, last_cell(dlg), vision, path=tmp_path/'chat.ipynb'))
+        assert '<file name=' in sent and 'Use &lt;this&gt; &amp; that.' in sent and 'input_file' not in sent
 
     # Cutoffs use original dialog positions, including pinned/skipped messages, and stay put as the dialog grows.
     d = Dialog()

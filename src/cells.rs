@@ -120,9 +120,9 @@ pub async fn media(nb: &Value, cell: &Value, caps: &Caps, ctx: &media::Context<'
         ATT_REF.captures_iter(&source).filter_map(|c| c.get(1).or_else(|| c.get(2))).map(|g| g.as_str().strip_suffix("#ai").unwrap_or(g.as_str())).collect();
     let mut res = vec![];
     for (id, a) in stored_atts(nb, cell).into_iter().flatten().filter(|(id, _)| refs.contains(id.as_str())) {
-        let data =
-            a.as_object().and_then(|o| o.values().next()).map(text_str).ok_or_else(|| "media data unavailable".to_string()).and_then(|s| media::decode(&s));
-        res.extend(media::item("content", id, data, None, caps));
+        let entry = a.as_object().and_then(|o| o.iter().next());
+        let data = entry.map(|(_, v)| text_str(v)).ok_or_else(|| "media data unavailable".to_string()).and_then(|s| media::decode(&s));
+        res.extend(media::item("content", id, data, entry.map(|(mime, _)| mime.as_str()), caps));
     }
     for reference in media_refs(cell) { res.extend(media::item("content", &reference, media::load(&reference, ctx).await, None, caps)); }
     if cell["cell_type"] == "code" && !is_prompt(cell) {
