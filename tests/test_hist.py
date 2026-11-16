@@ -5,7 +5,8 @@ from threading import Thread
 from aidialog.dialog import Dialog, Message, Attachment, prompt_output, code_output, displayobj
 from aidialog.msg_parts import Msg, Text, ToolUse, ToolResult, hist2fmt
 from aihist import (build, dlg2hist, dlg2chat, chat2dlg, reply2dlg, dlg2reply, tool_call, hist_xml, to_parts, to_media, media_item, resize_img,
-    pdf_pages, output_parts, merge_media, vars_hist, is_nameerr, get_exprs, get_refs, references, cell_turn, _core, task_tags, warning_tag, msg2md, dlg2md)
+    pdf_pages, output_parts, merge_media, vars_hist, is_nameerr, get_exprs, get_refs, references, cell_turn, _core, task_tags, warning_tag, msg2md, dlg2md,
+    msg2text, msgs2py)
 
 png = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR4nGP4DwABAQEAsTj2FAAAAABJRU5ErkJggg==')
 images = dict(input_modalities=['text', 'image'])
@@ -124,12 +125,24 @@ def test_messages_and_media(tmp_path):
 def test_markdown_documents():
     d = Dialog(name='doc')
     d.mk_message('# Results ![plot](attachment:img1.png)', msg_type='note').mk_attachment(png, 'image/png', 'img1.png')
-    d.mk_message('8*8', output=code_output('64'))
-    d.mk_message('Why 64?', msg_type='prompt', output=f"{tool('x1', '8*8', '64')}\n\nBecause $8^2=64$.")
+    code = d.mk_message('8*8', output=code_output('64'))
+    prompt = d.mk_message('Why 64?', msg_type='prompt', output=f"{tool('x1', '8*8', '64')}\n\nBecause $8^2=64$. ![](attachment:reply%20plot.png)")
+    prompt.mk_attachment(png, 'image/png', 'reply plot.png')
     # `dlg2md` writes a note as it is, with its attachments as data URIs, code with its outputs, and a prompt with its reply, whose tool blocks `fmt_tools` folds.
     doc = dlg2md(d)
     assert doc.startswith(f'# Results ![plot](data:image/png;base64,{base64.b64encode(png).decode()})\n\n```python\n8*8\n```\n\n::: output')
     assert '::: prompt' in doc and '::: reply' in doc and 'tool-usage-details' in doc and msg2md(Message('')) is None
+    assert doc.count('data:image/png;base64,') == 2 and 'attachment:reply' not in doc
+    assert '```bpl\n8*8' in dlg2md(d, language='bpl') and '```python' not in msg2md(code, language='bpl')
+    output_only = d.mk_message('', output=code_output('output without source'))
+    assert 'output without source' in msg2md(output_only) and '```python' not in msg2md(output_only)
+    assert msg2text(code, 'output') == '64' and 'Because' in msg2text(prompt, 'output') and '```json' not in msg2text(prompt, 'output')
+    # Marked Python delegates nbdev directives; the full transcript retains all cells with non-code and outputs commented.
+    code.meta = dict(nbdev=dict(export='true'), pinned=True, skipped=True)
+    assert msgs2py(d) == '8*8'
+    full = msgs2py(d, full=True)
+    compile(full, '<full transcript>', 'exec')
+    assert f'# --- Cell: {prompt.id} (prompt) ---' in full and '#> 64' in full and '# Because' in full
     # `weave` keeps only a code message's output text, and `exportfilter` keeps the messages aidialog's `export_filter` selects.
     assert dlg2md(d, weave=True).split('\n\n')[1] == '64'
     d.messages[2].pinned = True
