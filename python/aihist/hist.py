@@ -306,21 +306,19 @@ def dlg2reply(sub):
 @delegates(_msg2md, but='reply')
 def msg2md(m,
     weave:bool=False, # Write a code message as the plain text of its outputs only, as document prose?
-    *, cells:bool=False, # Write the message as an `mdhtml` notebook cell with its id and metadata?
     **kwargs
 ):
-    "One message as `mdhtml` Markdown, with the tool calls in a prompt's reply folded; None for a code message with no source and no output"
-    return _msg2md(m, weave, cells=cells, reply=fmt_tools, **kwargs)
+    "One message as plain Markdown, with the tool calls in a prompt's reply folded; None for a code message with no source and no output"
+    return _msg2md(m, weave, reply=fmt_tools, **kwargs)
 
 @delegates(_dlg2md, but='reply')
 def dlg2md(d,
     exportfilter:bool=False, # Keep only the messages `export_filter` selects?
     weave:bool=False, # Write code messages as the plain text of their outputs only, as document prose?
-    *, cells:bool=False, # Write each message as an `mdhtml` notebook cell with its id and metadata?
     **kwargs
 ):
-    "The dialog as one `mdhtml` Markdown document, with the tool calls in each reply folded"
-    return _dlg2md(d, exportfilter, weave, cells=cells, reply=fmt_tools, **kwargs)
+    "The dialog as one plain Markdown text, with the tool calls in each reply folded"
+    return _dlg2md(d, exportfilter, weave, reply=fmt_tools, **kwargs)
 
 def msg2text(m, part='input'):
     "Input source or plain-text output for copying one message part"

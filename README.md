@@ -49,7 +49,7 @@ A saved reply is Markdown, with each tool call and its result in a fenced `json 
 
 `dlg2md` writes a dialog as one Markdown document, and `msg2md` writes one message. Both call the functions of the same names in [mdhtml](https://github.com/AnswerDotAI/mdhtml#notebooks-and-dialogs) and fold the tool calls in each reply with `fmt_tools`. Notes are written as they are, code in language fences with its outputs in `::: output` divs, and each prompt and its reply in `::: prompt` and `::: reply` divs. Stored attachments referenced by notes, prompts and replies are inlined, and ordinary file links remain links.
 
-Pass `cells=True` to write each message as an `mdhtml` notebook cell with its notebook metadata and the id `_<message id>`. The other options are mdhtml's: `language`, `inline_atts`, `weave` and, for `dlg2md`, `exportfilter`.
+The other options are mdhtml's: `language`, `weave` and, for `dlg2md`, `exportfilter`. For a document that keeps each message as a notebook cell, call mdhtml's `dlg2mdhtml` with `reply=fmt_tools`, as `viewdlg` does.
 
 `msg2text(m, part='input')` gives the source, or `part='output'` gives text output with prompt tools removed. `msgs2py(msgs)` writes nbdev-marked code; `full=True` includes all code, commenting notes, prompts, replies and outputs. These conversions read saved messages without fetching linked files or changing the dialog.
 

@@ -135,9 +135,6 @@ def test_markdown_documents():
     assert '::: prompt' in doc and '::: reply' in doc and 'tool-usage-details' in doc and msg2md(Message('')) is None
     assert doc.count('data:image/png;base64,') == 2 and 'attachment:reply' not in doc
     assert '```bpl\n8*8' in dlg2md(d, language='bpl') and '```python' not in msg2md(code, language='bpl')
-    # With `cells`, each message is an `mdhtml` notebook cell, and the tool blocks in its reply are still folded.
-    cells = dlg2md(d, cells=True)
-    assert f'{{#_{prompt.id} data-cell="prompt"}}\nWhy 64?' in cells and 'tool-usage-details' in cells and '::: reply' not in cells
     output_only = d.mk_message('', output=code_output('output without source'))
     assert 'output without source' in msg2md(output_only) and '```python' not in msg2md(output_only)
     assert msg2text(code, 'output') == '64' and 'Because' in msg2text(prompt, 'output') and '```json' not in msg2text(prompt, 'output')
