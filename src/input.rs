@@ -42,7 +42,7 @@ pub struct Prompt {
     pub instructions: Option<String>,
     /// Example notebooks, which go before everything else. Their last message ends a prefix that a provider can cache.
     pub examples: Vec<Value>,
-    /// Each cell's time, by cell id, in the user's time zone
+    /// Each cell's host-supplied timestamp, by cell id
     pub times: Map<String, Value>,
 }
 
@@ -78,7 +78,7 @@ pub async fn turn(nb: &Value, cell: &Value, caps: &Caps, time: Option<&str>, ctx
     Turn { parts: parts(nb, cell, caps, time, ctx).await, reply: crate::cells::is_prompt(cell).then(|| ai_fmt(&msg(cell).out)), cache: false }
 }
 
-/// Cell `cell` of notebook `nb` as a message. `time` is the cell's time in the user's time zone.
+/// Cell `cell` of notebook `nb` as a message, with its host-supplied timestamp.
 async fn entry(nb: &Value, cell: &Value, caps: &Caps, time: Option<&str>, ctx: &media::Context<'_>) -> Entry {
     Entry { turn: turn(nb, cell, caps, time, ctx).await, tokens: scaled(tokens::total(cell, stored_atts(nb, cell))) }
 }

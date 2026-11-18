@@ -140,8 +140,7 @@ pub fn shown(cell: &Value) -> bool {
     !truthy(&meta["skipped"]) && !(cell["cell_type"] == "raw" && truthy(&meta["rec_kind"]))
 }
 
-/// Cell `cell` of notebook `nb` as a model reads it: its media, then its XML. `time` is the cell's time in the user's
-/// time zone.
+/// Cell `cell` of notebook `nb` as a model reads it: its media, then its XML, with its host-supplied timestamp.
 pub async fn parts(nb: &Value, cell: &Value, caps: &Caps, time: Option<&str>, ctx: &media::Context<'_>) -> Vec<Value> {
     let m = msg(cell);
     let mut res = media(nb, cell, caps, ctx).await;
