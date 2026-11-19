@@ -3,11 +3,10 @@ import ast, base64, binascii, hashlib, json, re
 from ast import literal_eval
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from urllib.parse import quote
 from fastcore.utils import first, listify, loop_first, rtoken_hex
-from fastcore.nbio import render_text
-from fastcore.xtras import fenced
-from aidialog.dialog import Dialog, Attachment, code_output, render_md, export_filter, sprompt, scode, snote, sraw
+from fastcore.meta import delegates
+from mdhtml.nb import msg2md as _msg2md, dlg2md as _dlg2md
+from aidialog.dialog import Dialog, Attachment, code_output, sprompt, scode, snote
 from aidialog.dialog import ai_fmt, render_outputs_ai, msgs2py as _marked_py
 from aidialog.ipynb import get_ipynb, msgs2ipynb
 from aidialog.msg_parts import Msg, Text, ToolUse, ToolResult, data_url, hist2fmt, mk_content, mk_part, resp_part
@@ -304,37 +303,22 @@ def dlg2reply(sub):
             msgs += [Msg('assistant', [ToolUse(id=tr.id, name=tr.name, arguments=tr.arguments)]), Msg('tool', [tr])]
     return write_reply(msgs)
 
-def _inline_atts(m, text):
-    "Rewrite `attachment:` refs in `text` as data URIs from `m`'s attachments, making the Markdown self-contained"
-    for a in m.attachments:
-        uri = f'data:{a.content_type};base64,{base64.b64encode(a.data).decode()}'
-        text = text.replace(f'attachment:{a.id}', uri).replace(f'attachment:{quote(a.id)}', uri)
-    return text
-
+@delegates(_msg2md, but='reply')
 def msg2md(m,
-    weave:bool=False, # Code messages contribute only `render_text` over their outputs, as document prose?
-    *, language:str='python', # Kernel language for code fences
+    weave:bool=False, # Write a code message as the plain text of its outputs only, as document prose?
+    **kwargs
 ):
-    "One message as Markdown, with stored attachments inlined, language fences, output divs and prompt/reply divs; None for empty code"
-    if m.msg_type == snote: return _inline_atts(m, m.content)
-    if m.msg_type == sraw: return fenced(m.content)
-    if m.msg_type == sprompt:
-        parts = [fenced(_inline_atts(m, m.content), ' prompt', ch=':')]
-        if (ai := (m.ai_res or '')).strip(): parts.append(fenced(_inline_atts(m, fmt_tools(ai)), ' reply', ch=':'))
-        return '\n\n'.join(parts)
-    if weave: return render_text(m.output or []) or None
-    parts = [fenced(m.content, language)] if m.content.strip() else []
-    if (outs := render_md(m.output or [])): parts.append(fenced(outs, ' output', ch=':'))
-    return '\n\n'.join(parts) or None
+    "One message as plain Markdown, with the tool calls in a prompt's reply folded; None for a code message with no source and no output"
+    return _msg2md(m, weave, reply=fmt_tools, **kwargs)
 
+@delegates(_dlg2md, but='reply')
 def dlg2md(d,
     exportfilter:bool=False, # Keep only the messages `export_filter` selects?
-    weave:bool=False, # Code messages contribute only `render_text` over their outputs, as document prose?
-    *, language:str='python', # Kernel language for code fences
+    weave:bool=False, # Write code messages as the plain text of their outputs only, as document prose?
+    **kwargs
 ):
-    "The dialog as one Markdown document"
-    ms = export_filter(d) if exportfilter else d
-    return '\n\n'.join(filter(None, (msg2md(m, weave=weave, language=language) for m in ms))) + '\n'
+    "The dialog as one plain Markdown text, with the tool calls in each reply folded"
+    return _dlg2md(d, exportfilter, weave, reply=fmt_tools, **kwargs)
 
 def msg2text(m, part='input'):
     "Input source or plain-text output for copying one message part"

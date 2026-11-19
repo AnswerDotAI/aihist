@@ -47,9 +47,31 @@ A saved reply is Markdown, with each tool call and its result in a fenced `json 
 
 `dlg2chat` turns a dialog into chat messages, with each reply's tool calls as real parts, and `chat2dlg` turns chat messages back into a dialog. `reply2dlg` turns one reply into a dialog of notes and code that calls the tools, which `dlg2reply` turns back into the reply. `hist_xml`, `to_media` and `to_parts` give one message as a model reads it.
 
-`dlg2md` writes a dialog as one Markdown document: notes as they are, code in language fences with its outputs in `::: output` divs, and each prompt and its reply in `::: prompt` and `::: reply` divs. `msg2md` writes one message. Both accept `language='python'` and inline stored attachments referenced by notes, prompts and replies; ordinary file links remain links.
+`dlg2md` writes a dialog as one Markdown document, and `msg2md` writes one message. Both call the functions of the same names in [mdhtml](https://github.com/AnswerDotAI/mdhtml#notebooks-and-dialogs) and fold the tool calls in each reply with `fmt_tools`. Notes are written as they are, code in language fences with its outputs in `::: output` divs, and each prompt and its reply in `::: prompt` and `::: reply` divs. Stored attachments referenced by notes, prompts and replies are inlined, and ordinary file links remain links.
+
+The other options are mdhtml's: `language`, `weave` and, for `dlg2md`, `exportfilter`. For a document that keeps each message as a notebook cell, call mdhtml's `dlg2mdhtml` with `reply=fmt_tools`, as `viewdlg` does.
 
 `msg2text(m, part='input')` gives the source, or `part='output'` gives text output with prompt tools removed. `msgs2py(msgs)` writes nbdev-marked code; `full=True` includes all code, commenting notes, prompts, replies and outputs. These conversions read saved messages without fetching linked files or changing the dialog.
 
 `reply2dlg` and `dlg2reply` retain Python code-cell editing and use the native reply parser, output renderer and writer. `dlg2reply` applies the same saved-history shortening and text ceiling as `write_reply`.
 
+## Viewing a dialog
+
+`viewdlg` needs the `view` extra, which adds mdhtml's highlighter and the packages that `--fill` runs code with:
+
+```bash
+pip install 'aihist[view]'
+```
+
+```bash
+viewdlg examples/nbsample.ipynb
+viewdlg examples/nbsample.ipynb --fill
+```
+
+`viewdlg` opens a dialog or notebook in the browser, in [mdhtml](https://github.com/AnswerDotAI/mdhtml#browser-viewer)'s viewer. Each message is one `div` element with its notebook metadata. The element's id is the message's id after an underscore, such as `_a1b2c3d4`, so a Solveit message link such as `#_a1b2c3d4` scrolls to it. Note messages are read as one combined document, rather than one document per cell. That way, a numbered list can continue across a code message, and a footnote defined in one message resolves from another.
+
+Code appears as a highlighted block with its stored outputs below it. Each prompt appears in a bordered section with its reply indented below it, and the tool calls in the reply are folded.
+
+`--fill` views a notebook template filled from its `formdata`. This executes the template's participating code, as mdhtml's `fillmd` does. A filled notebook uses its exported messages when any exist, otherwise its non-pinned messages. The other options are `viewmd`'s.
+
+`examples/nbsample.ipynb` is a small notebook to try both commands on. It has a table, an image, footnotes, cross-references, math and code with stored outputs. Its frontmatter has `formdata` for the template tokens in its text, which `--fill` fills.

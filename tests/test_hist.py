@@ -1,8 +1,9 @@
 "aihist turns dialogs into model history, chat messages and Markdown documents, chat messages back into dialogs, and one message into its XML and media"
-import base64, json
+import base64, json, os, subprocess
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Thread
 from aidialog.dialog import Dialog, Message, Attachment, prompt_output, code_output, displayobj
+from aidialog.ipynb import write_ipynb
 from aidialog.msg_parts import Msg, Text, ToolUse, ToolResult, hist2fmt
 from aihist import (build, dlg2hist, dlg2chat, chat2dlg, reply2dlg, dlg2reply, tool_call, hist_xml, to_parts, to_media, media_item, resize_img,
     pdf_pages, output_parts, merge_media, vars_hist, is_nameerr, get_exprs, get_refs, references, cell_turn, _core, task_tags, warning_tag, msg2md, dlg2md,
@@ -147,3 +148,15 @@ def test_markdown_documents():
     assert dlg2md(d, weave=True).split('\n\n')[1] == '64'
     d.messages[2].pinned = True
     assert '::: prompt' not in dlg2md(d, exportfilter=True)
+
+
+def test_viewdlg(tmp_path):
+    d = Dialog(name='doc')
+    d.mk_message('---\nnumber_headings: legal\n---', msg_type='raw')
+    note = d.mk_message('# T\n\n## A\n\n### B', msg_type='note')
+    d.mk_message('Why 64?', msg_type='prompt', output=f"{tool('x1', '8*8', '64')}\n\nBecause.")
+    write_ipynb(d, tmp_path/'doc.ipynb')
+    # `viewdlg` writes mdhtml's viewer page with the notebook's frontmatter applied, one element per message, and tool calls folded.
+    subprocess.run(['viewdlg', str(tmp_path/'doc.ipynb')], env=dict(os.environ, HOME=str(tmp_path), BROWSER='/usr/bin/true'), check=True)
+    html = (tmp_path/'.cache/md2html/doc.html').read_text()
+    assert '<span class="heading-number">(a)</span> B' in html and f'id="_{note.id}"' in html and 'tool-usage-details' in html
