@@ -5,7 +5,7 @@ from threading import Thread
 from aidialog.dialog import Dialog, Message, Attachment, prompt_output, code_output, displayobj
 from aidialog.msg_parts import Msg, Text, ToolUse, ToolResult, hist2fmt
 from aihist import (build, dlg2hist, dlg2chat, chat2dlg, reply2dlg, dlg2reply, tool_call, hist_xml, to_parts, to_media, media_item, resize_img,
-    pdf_pages, output_parts, merge_media, vars_hist, is_nameerr, get_exprs, get_refs, references, cell_turn, _core, task_tags, warning_tag, msg2md, dlg2md,
+    pdf_pages, output_parts, merge_media, vars_hist, is_nameerr, get_exprs, get_refs, references, cell_turn, _core, task_tags, warning_tag, msg2md, dlg2md, dlg2doc, dlg2mdhtml,
     msg2text, msgs2py)
 
 png = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR4nGP4DwABAQEAsTj2FAAAAABJRU5ErkJggg==')
@@ -147,3 +147,7 @@ def test_markdown_documents():
     assert dlg2md(d, weave=True).split('\n\n')[1] == '64'
     d.messages[2].pinned = True
     assert '::: prompt' not in dlg2md(d, exportfilter=True)
+    # `dlg2doc` and `dlg2mdhtml` build `mdhtml` documents with folded tool blocks and optional cell wrappers.
+    frag = dlg2mdhtml(d, wrap=True, id_prefix='_')
+    assert f'id="_{prompt.id}" data-cell="prompt"' in frag and 'tool-usage-details' in frag
+    assert dlg2doc(d, wrap=False).blocks[0]['type'] == 'heading' 

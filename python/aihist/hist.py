@@ -3,12 +3,11 @@ import ast, base64, binascii, hashlib, json, re
 from ast import literal_eval
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from urllib.parse import quote
+from fastcore.meta import delegates
 from fastcore.utils import first, listify, loop_first, rtoken_hex
-from fastcore.nbio import render_text
-from fastcore.xtras import fenced
-from aidialog.dialog import Dialog, Attachment, code_output, render_md, export_filter, sprompt, scode, snote, sraw
+from aidialog.dialog import Dialog, Attachment, code_output, sprompt, scode, snote, sraw
 from aidialog.dialog import ai_fmt, render_outputs_ai, msgs2py as _marked_py
+from mdhtml.nb import msg2md as _msg2md, dlg2md as _dlg2md, dlg2doc as _dlg2doc, dlg2mdhtml as _dlg2mdhtml
 from aidialog.ipynb import get_ipynb, msgs2ipynb
 from aidialog.msg_parts import Msg, Text, ToolUse, ToolResult, data_url, hist2fmt, mk_content, mk_part, resp_part
 from . import _core
@@ -17,7 +16,7 @@ from .reply import fmt2hist, fmt_tools, strip_tools, write_reply
 __all__ = ['UNSUPPORTED_MSG', 'im_max', 'IMG_TOKS', 'jwrap', 'to_local_time', 'media_item', 'resize_img', 'prep_img', 'pdf_pages', 'count_tokens',
     'output_parts', 'merge_media', 'tool_result', 'get_refs', 'get_exprs', 'is_nameerr', 'vars_tag', 'vars_hist', 'task_tags', 'warning_tag',
     'local_time', 'cell_turn', 'cell_media', 'cell_reply', 'is_shown', 'references', 'hist_xml', 'to_media', 'to_parts', 'tool_call', 'build', 'dlg2hist', 'reply2chat', 'dlg2chat', 'chat2dlg', 'reply2dlg',
-    'dlg2reply', 'msg2md', 'dlg2md', 'msg2text', 'msgs2py']
+    'dlg2reply', 'msg2md', 'dlg2md', 'dlg2doc', 'dlg2mdhtml', 'msg2text', 'msgs2py']
 
 UNSUPPORTED_MSG,im_max,IMG_TOKS = _core.UNSUPPORTED,_core.IM_MAX,_core.IMG_TOKENS
 
@@ -304,37 +303,25 @@ def dlg2reply(sub):
             msgs += [Msg('assistant', [ToolUse(id=tr.id, name=tr.name, arguments=tr.arguments)]), Msg('tool', [tr])]
     return write_reply(msgs)
 
-def _inline_atts(m, text):
-    "Rewrite `attachment:` refs in `text` as data URIs from `m`'s attachments, making the Markdown self-contained"
-    for a in m.attachments:
-        uri = f'data:{a.content_type};base64,{base64.b64encode(a.data).decode()}'
-        text = text.replace(f'attachment:{a.id}', uri).replace(f'attachment:{quote(a.id)}', uri)
-    return text
+@delegates(_msg2md, but='reply')
+def msg2md(m, weave:bool=False, **kwargs):
+    "One message as Markdown, with tool calls in a prompt's reply folded; None for empty code"
+    return _msg2md(m, weave=weave, reply=fmt_tools, **kwargs)
 
-def msg2md(m,
-    weave:bool=False, # Code messages contribute only `render_text` over their outputs, as document prose?
-    *, language:str='python', # Kernel language for code fences
-):
-    "One message as Markdown, with stored attachments inlined, language fences, output divs and prompt/reply divs; None for empty code"
-    if m.msg_type == snote: return _inline_atts(m, m.content)
-    if m.msg_type == sraw: return fenced(m.content)
-    if m.msg_type == sprompt:
-        parts = [fenced(_inline_atts(m, m.content), ' prompt', ch=':')]
-        if (ai := (m.ai_res or '')).strip(): parts.append(fenced(_inline_atts(m, fmt_tools(ai)), ' reply', ch=':'))
-        return '\n\n'.join(parts)
-    if weave: return render_text(m.output or []) or None
-    parts = [fenced(m.content, language)] if m.content.strip() else []
-    if (outs := render_md(m.output or [])): parts.append(fenced(outs, ' output', ch=':'))
-    return '\n\n'.join(parts) or None
+@delegates(_dlg2md, but='reply')
+def dlg2md(d, exportfilter:bool=False, weave:bool=False, **kwargs):
+    "The dialog as one Markdown document, with tool calls in each reply folded"
+    return _dlg2md(d, exportfilter=exportfilter, weave=weave, reply=fmt_tools, **kwargs)
 
-def dlg2md(d,
-    exportfilter:bool=False, # Keep only the messages `export_filter` selects?
-    weave:bool=False, # Code messages contribute only `render_text` over their outputs, as document prose?
-    *, language:str='python', # Kernel language for code fences
-):
-    "The dialog as one Markdown document"
-    ms = export_filter(d) if exportfilter else d
-    return '\n\n'.join(filter(None, (msg2md(m, weave=weave, language=language) for m in ms))) + '\n'
+@delegates(_dlg2doc, but='reply')
+def dlg2doc(d, **kwargs):
+    "Build an `mdhtml.Document` from a dialog, with tool calls in each reply folded"
+    return _dlg2doc(d, reply=fmt_tools, **kwargs)
+
+@delegates(_dlg2mdhtml, but='reply')
+def dlg2mdhtml(d, **kwargs):
+    "Render a dialog to an `Mdhtml` fragment, with tool calls in each reply folded"
+    return _dlg2mdhtml(d, reply=fmt_tools, **kwargs)
 
 def msg2text(m, part='input'):
     "Input source or plain-text output for copying one message part"
