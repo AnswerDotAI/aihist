@@ -47,7 +47,7 @@ A saved reply is Markdown, with each tool call and its result in a fenced `json 
 
 `dlg2chat` turns a dialog into chat messages, with each reply's tool calls as real parts, and `chat2dlg` turns chat messages back into a dialog. `reply2dlg` turns one reply into a dialog of notes and code that calls the tools, which `dlg2reply` turns back into the reply. `hist_xml`, `to_media` and `to_parts` give one message as a model reads it.
 
-`dlg2md` writes a dialog as one Markdown document: notes as they are, code in language fences with its outputs in `::: output` divs, and each prompt and its reply in `::: prompt` and `::: reply` divs. `msg2md` writes one message. Both accept `language='python'` and inline stored attachments referenced by notes, prompts and replies; ordinary file links remain links.
+`dlg2doc` and `dlg2mdhtml` project a dialog into an `mdhtml` `Document` or MDHTML fragment with Solveit reply tool blocks folded via `fmt_tools`. `dlg2md` writes a dialog as one source-preserving Markdown document: notes as they are, code in language fences with its outputs in `::: output` divs, and each prompt and its reply in `::: prompt` and `::: reply` divs. `msg2md` writes one message. All accept `language` (defaulting to the dialog kernelspec or `"python"`) and attachment rewriting via `att_url` (inlining stored attachments as data URIs by default; ordinary file links remain links).
 
 `msg2text(m, part='input')` gives the source, or `part='output'` gives text output with prompt tools removed. `msgs2py(msgs)` writes nbdev-marked code; `full=True` includes all code, commenting notes, prompts, replies and outputs. These conversions read saved messages without fetching linked files or changing the dialog.
 
