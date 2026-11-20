@@ -98,14 +98,20 @@ pub fn envelope(task: &str, sid: &str, time: Option<&str>) -> String {
     format!("<instructions>Respond to the request in the `prompt` below.</instructions>\n<prompt{attrs}>{task}</prompt>")
 }
 
-/// `m` as the XML a model reads: a prompt in its envelope, or a `<markdown>`, `<code>` or `<raw>` element with the
-/// cell's id, its `time`, its nbdev metadata directives, and any output
+/// `m` as the XML a model reads: a prompt in its envelope, or a `<markdown>`, `<code>`, `<raw>` or `<diff>` element
+/// with the cell's id, its `time`, its review or nbdev metadata directives, and any output
 pub fn xml(cell: &Value, m: &Msg, time: Option<&str>) -> String {
     let id = cell["id"].as_str().unwrap_or_default();
     if m.typ == "prompt" { return envelope(&m.content, id, time); }
-    let tag = if m.typ == "note" { "markdown" } else { m.typ };
+    let review = (m.typ == "raw").then(|| cell["metadata"]["review"].as_object()).flatten();
+    let tag = if review.is_some() { "diff" } else if m.typ == "note" { "markdown" } else { m.typ };
     let mut attrs = if id.is_empty() { String::new() } else { xml_attr("id", id) };
     if let Some(t) = time { attrs += &xml_attr("time", t) }
+    if let Some(r) = review {
+        for k in ["path", "kind", "status", "file_status", "baseline", "cell_id", "cell_type"] {
+            if let Some(v) = r.get(k).and_then(Value::as_str).filter(|s| !s.is_empty()) { attrs += &xml_attr(k, v); }
+        }
+    }
     for (k, v) in cell["metadata"]["nbdev"].as_object().into_iter().flatten() {
         match v.as_str() { Some("true" | "") => attrs += &format!(" {k}"), Some(v) => attrs += &xml_attr(k, v), None => {} }
     }
@@ -146,4 +152,57 @@ pub async fn parts(nb: &Value, cell: &Value, caps: &Caps, time: Option<&str>, ct
     let mut res = media(nb, cell, caps, ctx).await;
     res.push(text(xml(cell, &m, time)));
     res
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn review_diff_xml() {
+        let hunk = json!({
+            "id": "a1b2c3d4", "cell_type": "raw", "source": "@@ -10,2 +10,2 @@\n-old\n+new\n",
+            "metadata": {"review": {
+                "head": "deadbeef", "baseline": ":0", "path": "src/auth.py", "kind": "hunk",
+                "status": "pending", "file_status": "modified", "cell_id": null, "cell_type": null
+            }}
+        });
+        assert_eq!(kind(&hunk), "raw");
+        assert!(shown(&hunk));
+        assert_eq!(
+            xml(&hunk, &msg(&hunk), Some("2026-11-20T09:00:00Z")),
+            "<diff id=\"a1b2c3d4\" time=\"2026-11-20T09:00:00Z\" path=\"src/auth.py\" kind=\"hunk\" status=\"pending\" file_status=\"modified\" baseline=\":0\">@@ -10,2 +10,2 @@\n-old\n+new\n</diff>"
+        );
+
+        let nb_cell = json!({
+            "id": "c9d8e7f6", "cell_type": "raw", "source": "@@ -1,1 +1,1 @@\n-x = 1\n+x = 2\n",
+            "metadata": {"review": {
+                "baseline": ":0", "path": "nbs/00_core.ipynb", "kind": "cell",
+                "status": "accepted", "file_status": "modified", "cell_id": "955b9784", "cell_type": "code"
+            }}
+        });
+        assert_eq!(
+            xml(&nb_cell, &msg(&nb_cell), None),
+            "<diff id=\"c9d8e7f6\" path=\"nbs/00_core.ipynb\" kind=\"cell\" status=\"accepted\" file_status=\"modified\" baseline=\":0\" cell_id=\"955b9784\" cell_type=\"code\">@@ -1,1 +1,1 @@\n-x = 1\n+x = 2\n</diff>"
+        );
+
+        let rejected = json!({
+            "id": "r9", "cell_type": "raw", "source": "@@ -0,0 +1,1 @@\n+hi\n",
+            "metadata": {"review": {"path": "a&b<1>.py", "kind": "hunk", "status": "rejected", "file_status": "added", "baseline": ":0"}}
+        });
+        assert_eq!(
+            xml(&rejected, &msg(&rejected), None),
+            "<diff id=\"r9\" path=\"a&amp;b&lt;1&gt;.py\" kind=\"hunk\" status=\"rejected\" file_status=\"added\" baseline=\":0\">@@ -0,0 +1,1 @@\n+hi\n</diff>"
+        );
+
+        let plain = json!({"id": "p1", "cell_type": "raw", "source": "plain raw", "metadata": {}});
+        assert_eq!(xml(&plain, &msg(&plain), None), "<raw id=\"p1\">plain raw</raw>");
+
+        let non_obj = json!({"id": "p2", "cell_type": "raw", "source": "raw", "metadata": {"review": false}});
+        assert_eq!(xml(&non_obj, &msg(&non_obj), None), "<raw id=\"p2\">raw</raw>");
+
+        let note = json!({"id": "n1", "cell_type": "markdown", "source": "note", "metadata": {"review": {"path": "x.py"}}});
+        assert_eq!(xml(&note, &msg(&note), None), "<markdown id=\"n1\">note</markdown>");
+    }
 }
