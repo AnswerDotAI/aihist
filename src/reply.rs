@@ -2,6 +2,8 @@
 //! holding its `id`, `name`, `args` and `result`, and usage in a `json {.usage}` block.
 //! `parse` reads a stored reply into blocks, `items` turns blocks into Responses input items for the model, and `write` writes a turn as a stored reply.
 
+use regex::Regex;
+use std::sync::LazyLock;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
@@ -359,8 +361,123 @@ fn trunc_str(s: &str, mx: usize, skip: usize, tag: bool) -> String {
     if tag { format!("<TRUNCATED>{cut}</TRUNCATED>") } else { cut }
 }
 
-/// A run of backticks one longer than any run inside `text`, and at least `min` long
-fn fence(text: &str, min: usize) -> String { "`".repeat(text.split(|c| c != '`').map(str::len).max().unwrap_or(0).max(min - 1) + 1) }
+/// A run of `ch` one longer than any run inside `text`, and at least `min` long
+fn fence_ch(text: &str, min: usize, ch: char) -> String {
+    let mut s = String::new();
+    let n = text.split(|c| c != ch).map(|r| r.chars().count()).max().unwrap_or(0).max(min - 1) + 1;
+    for _ in 0..n { s.push(ch); }
+    s
+}
+
+fn fence(text: &str, min: usize) -> String { fence_ch(text, min, '`') }
+
+/// `text` in a fence of at least three `ch` characters, as fastcore's `fenced` writes it
+pub(crate) fn fenced_ch(text: &str, info: &str, ch: char) -> String {
+    let fence = fence_ch(text, 3, ch);
+    format!("{fence}{info}\n{}\n{fence}", text.trim_end_matches('\n'))
+}
 
 /// `text` in a fence of at least three backticks, as fastcore's `fenced` writes it
-fn fenced(text: &str, info: &str) -> String { let fence = fence(text, 3); format!("{fence}{info}\n{}\n{fence}", text.trim_end_matches('\n')) }
+fn fenced(text: &str, info: &str) -> String { fenced_ch(text, info, '`') }
+
+static NL_RUN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\n(?:\s*\n)*").expect("valid regex"));
+
+fn fmt_param(v: &Value) -> String {
+    let raw = match v { Value::String(s) => s.clone(), other => other.to_string() };
+    let collapsed = NL_RUN.replace_all(&raw, "¶");
+    let mut cs = collapsed.chars();
+    let head: String = cs.by_ref().take(40).collect();
+    let s = if cs.next().is_some() { format!("{head}…") } else { head };
+    serde_json::to_string(&s).unwrap_or_default()
+}
+
+fn code_span(txt: &str) -> String {
+    let ticks = fence_ch(txt, 1, '`');
+    let pad = if txt.contains('`') { " " } else { "" };
+    format!("{ticks}{pad}{txt}{pad}{ticks}")
+}
+
+fn fmt_int_commas(n: i64) -> String {
+    let neg = n < 0;
+    let s = n.unsigned_abs().to_string();
+    let mut out = String::with_capacity(s.len() + s.len() / 3 + usize::from(neg));
+    if neg { out.push('-'); }
+    for (i, ch) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i) % 3 == 0 { out.push(','); }
+        out.push(ch);
+    }
+    out
+}
+
+fn val_str(v: &Value) -> String { match v { Value::String(s) => s.clone(), other => other.to_string() } }
+
+/// Display Markdown for one parsed `{.tool}` block: a folded details div labeled `func(params)→result`
+pub fn tool_md(d: &Value) -> String {
+    let args = d.get("args").and_then(Value::as_object);
+    let params = args.map(|m| m.iter().map(|(k, v)| format!("{k}={}", fmt_param(v))).collect::<Vec<_>>().join(", ")).unwrap_or_default();
+    let res = d.get("result");
+    let tail = match res {
+        None | Some(Value::Null) => String::new(),
+        Some(Value::String(s)) if s.is_empty() => String::new(),
+        Some(v) => format!("→{}", fmt_param(v)),
+    };
+    let name = d.get("name").and_then(Value::as_str).unwrap_or("None");
+    let label = code_span(&format!("{name}({params}){tail}"));
+    let code_arg = match name { "py" | "python" => Some("code"), "bash" => Some("cmd"), _ => None };
+    let code = code_arg.and_then(|k| args.and_then(|m| m.get(k))).filter(|v| !v.is_null());
+    let res_text = res.filter(|v| !v.is_null()).map(val_str).filter(|s| !s.trim().is_empty());
+    let mut body = if let Some(c) = code {
+        let mut b = format!("Code:\n{}", fenced(&val_str(c), name));
+        if let Some(rs) = res_text { b.push_str(&format!("\n\nOutput:\n\n{}", fenced(&rs, ""))); }
+        b
+    } else {
+        let pretty = serde_json::to_string_pretty(&args.cloned().map(Value::Object).unwrap_or_else(|| Value::Object(Map::new()))).unwrap_or_default();
+        let mut b = format!("Args:\n{}", fenced(&pretty, "json"));
+        if let Some(rs) = res_text {
+            if d.get("md").and_then(Value::as_bool) == Some(true) { b.push_str(&format!("\n\n{rs}")); }
+            else { b.push_str(&format!("\n\nOutput:\n\n{}", fenced(&rs, ""))); }
+        }
+        b
+    };
+    body = format!("## {label}\n\n{body}");
+    fenced_ch(&body, " {.details .tool-usage-details}", ':')
+}
+
+/// Display Markdown for one parsed `{.usage}` block: a folded details div labeled with cost or tokens
+pub fn usage_md(d: &Value) -> String {
+    let summ = d.get("summary").and_then(Value::as_str).filter(|s| !s.is_empty()).map(str::to_owned).unwrap_or_else(|| {
+        if let Some(cost) = d.get("cost").and_then(Value::as_f64).filter(|&c| c != 0.0) { format!("${cost:.4}") }
+        else { format!("{} tokens", fmt_int_commas(d.get("total_tokens").and_then(Value::as_i64).unwrap_or(0))) }
+    });
+    let det = d.get("detail").and_then(Value::as_str).filter(|s| !s.is_empty()).map(str::to_owned).unwrap_or_else(|| {
+        d.as_object()
+            .map(|m| {
+                m.iter()
+                    .filter(|(k, v)| *k != "model" && crate::cells::truthy(v))
+                    .map(|(k, v)| match v {
+                        Value::Number(n) if n.is_i64() => format!("{k}={}", fmt_int_commas(n.as_i64().unwrap())),
+                        Value::String(s) => format!("{k}={s}"),
+                        other => format!("{k}={other}"),
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" | ")
+            })
+            .unwrap_or_default()
+    });
+    fenced_ch(&format!("## {summ}\n\n{}", code_span(&det)), " {.details .token-usage-details}", ':')
+}
+
+/// Rewrite fenced JSON tool and usage blocks in `s` into folded `::: details` display Markdown
+pub fn fmt_tools(s: &str) -> String {
+    let (mut out, mut pos) = (String::with_capacity(s.len()), 0);
+    for (info, body, start, end) in fenced_blocks(s) {
+        if info != TOOL_INFO && info != USAGE_INFO { continue; }
+        let Ok(d) = serde_json::from_str::<Value>(body) else { continue; };
+        out.push_str(&s[pos..start]);
+        out.push_str(&if info == TOOL_INFO { tool_md(&d) } else { usage_md(&d) });
+        out.push('\n');
+        pos = end;
+    }
+    out.push_str(&s[pos..]);
+    out
+}

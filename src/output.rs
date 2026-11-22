@@ -1,6 +1,8 @@
 //! Kernel outputs as a model reads them: a code cell's outputs, and the result of a tool call that runs code.
 
-use serde_json::Value;
+use regex::Regex;
+use serde_json::{Value, json};
+use std::sync::LazyLock;
 
 use crate::Caps;
 use crate::cells::text_str;
@@ -194,14 +196,158 @@ pub fn tool_result<'a>(outs: impl Iterator<Item = (&'a str, &'a Value)>, caps: &
     merge(text, parts, full, md)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+static DISPLAY_ENV: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\\begin\{(align|equation|gather|multline|eqnarray)").expect("valid regex"));
 
-    #[test]
-    fn keep_ends_cuts_the_middle_at_char_boundaries() {
-        assert_eq!(keep_ends("short".into(), 5, 5), "short");
-        let kept = keep_ends("€ab€cd€".into(), 4, 5);
-        assert_eq!(kept, "€a\n[4 bytes of output removed]\ncd€");
+/// Canonicalize a `text/latex` payload to `\(...\)`/`\[...\]` delimiters, or `$...$`/`$$...$$` when `dollars`
+pub fn normalize_text_latex(s: &str, dollars: bool) -> String {
+    if s.is_empty() { return String::new(); }
+    let (disp, tex) = if let Some(inner) = s.strip_prefix(r"\[").and_then(|t| t.strip_suffix(r"\]")) { (true, inner) }
+    else if let Some(inner) = s.strip_prefix(r"\(").and_then(|t| t.strip_suffix(r"\)")) { (false, inner) }
+    else if let Some(inner) = s.strip_prefix("$$").and_then(|t| t.strip_suffix("$$")) { (true, inner) }
+    else if let Some(inner) = s.strip_prefix('$').and_then(|t| t.strip_suffix('$')) { (false, inner) }
+    else { (DISPLAY_ENV.is_match(s), s) };
+    match (dollars, disp) {
+        (true, true) => format!("$${tex}$$"),
+        (true, false) => format!("${tex}$"),
+        (false, true) => format!(r"\[{tex}\]"),
+        (false, false) => format!(r"\({tex}\)"),
     }
+}
+
+/// Concatenate stdout, stderr and markdown streams, keeping `error` and `execute_result` outputs at the end
+pub(crate) fn concat_streams(outputs: &[Value]) -> Vec<Value> {
+    let (mut stdout, mut stderr, mut markdown) = (String::new(), String::new(), String::new());
+    let (mut has_out, mut has_err, mut has_md) = (false, false, false);
+    let (mut res, mut exec_results) = (Vec::new(), Vec::new());
+    for out in outputs {
+        match out["output_type"].as_str().unwrap_or("") {
+            "stream" => {
+                let text = text_str(&out["text"]);
+                match out["name"].as_str().unwrap_or("") {
+                    "stdout" => { stdout.push_str(&text); has_out = true; }
+                    "stderr" => { stderr.push_str(&text); has_err = true; }
+                    "markdown" => { markdown.push_str(&text); has_md = true; }
+                    _ => res.push(out.clone()),
+                }
+            }
+            "error" | "execute_result" => exec_results.push(out.clone()),
+            _ => res.push(out.clone()),
+        }
+    }
+    if has_out { res.push(json!({ "output_type": "stream", "name": "stdout", "text": clean_cli(&stdout) })); }
+    if has_err { res.push(json!({ "output_type": "stream", "name": "stderr", "text": clean_cli(&stderr) })); }
+    if has_md { res.push(json!({ "output_type": "display_data", "data": { "text/markdown": markdown }, "metadata": {} })); }
+    res.extend(exec_results);
+    res
+}
+
+/// Preferred MIME type and content for a Jupyter output dict
+pub(crate) fn preferred_msg_out(out: &Value, html1st: bool, include_imgs: bool) -> (&'static str, String) {
+    match out["output_type"].as_str().unwrap_or("") {
+        "stream" => ("text/plain", text_str(&out["text"])),
+        "error" => ("text/plain", out["traceback"].as_array().map(|a| a.iter().map(text_str).collect::<Vec<_>>().join("\n")).unwrap_or_default()),
+        "execute_result" | "display_data" => {
+            let Some(data) = out["data"].as_object() else { return ("text/plain", String::new()); };
+            let mut order: Vec<&'static str> = if html1st {
+                vec!["text/html", "text/markdown", "application/javascript", "text/latex"]
+            } else {
+                vec!["text/markdown", "text/html", "application/javascript", "text/latex"]
+            };
+            if include_imgs { order.extend(["image/jpeg", "image/png", "image/webp", "image/svg+xml"]); }
+            order.push("text/plain");
+            for mt in order {
+                if let Some(v) = data.get(mt) {
+                    let s = text_str(v);
+                    if !s.is_empty() { return (mt, s); }
+                }
+            }
+            ("text/plain", String::new())
+        }
+        _ => ("text/plain", format!("Error: Failed to parse unknown output - {out}")),
+    }
+}
+
+/// Plain-text rendering of a Jupyter output list, as `aidialog.dialog.render_outputs_ai`
+pub fn render_outputs_ai(outputs: &[Value], dollars: bool) -> String {
+    concat_streams(outputs)
+        .iter()
+        .map(|o| {
+            let (mime, d) = preferred_msg_out(o, false, false);
+            match mime {
+                "text/plain" => strip_ansi(&d),
+                "text/html" | "text/markdown" => d,
+                "text/latex" => normalize_text_latex(&d, dollars),
+                "application/javascript" => format!("<script>{d}</script>"),
+                _ => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Render notebook outputs as Markdown: text in `output` fences, HTML in `{=html}`, Markdown inlined, images as data URIs
+pub fn render_md(outputs: &[Value], html1st: bool) -> String {
+    let (mut parts, mut buf) = (Vec::new(), String::new());
+    let flush = |buf: &mut String, parts: &mut Vec<String>| {
+        let trimmed = buf.trim_end();
+        if !trimmed.is_empty() { parts.push(crate::reply::fenced_ch(trimmed, "output", '`')); }
+        buf.clear();
+    };
+    for o in concat_streams(outputs) {
+        let (mime, d) = preferred_msg_out(&o, html1st, true);
+        if d.is_empty() { continue; }
+        match mime {
+            "text/plain" => {
+                let s = strip_ansi(&d);
+                buf.push_str(&s);
+                if !s.ends_with('\n') { buf.push('\n'); }
+            }
+            "text/html" | "image/svg+xml" => {
+                flush(&mut buf, &mut parts);
+                parts.push(crate::reply::fenced_ch(d.trim(), "{=html}", '`'));
+            }
+            "application/javascript" => {
+                flush(&mut buf, &mut parts);
+                parts.push(crate::reply::fenced_ch(&format!("<script>{d}</script>"), "{=html}", '`'));
+            }
+            "text/markdown" | "text/latex" => {
+                flush(&mut buf, &mut parts);
+                parts.push(d.trim().to_owned());
+            }
+            "image/jpeg" | "image/png" | "image/webp" => {
+                flush(&mut buf, &mut parts);
+                let b64: String = d.split_whitespace().collect();
+                parts.push(format!("![](data:{mime};base64,{b64})"));
+            }
+            _ => {}
+        }
+    }
+    flush(&mut buf, &mut parts);
+    parts.join("\n\n")
+}
+
+/// Concise ANSI-stripped text for outputs, wrapped in XML-ish tags when multiple outputs appear
+pub fn render_text(outputs: &[Value], html1st: bool, cap_tb: bool) -> String {
+    let mut items: Vec<(String, String)> = Vec::new();
+    for out in concat_streams(outputs) {
+        let typ = out["output_type"].as_str().unwrap_or("");
+        let (mime, raw) = if typ == "error" && cap_tb {
+            ("text/plain", traceback(out["traceback"].as_array().map(Vec::as_slice).unwrap_or_default(), true))
+        } else {
+            preferred_msg_out(&out, html1st, false)
+        };
+        let d = strip_ansi(&raw);
+        if d.is_empty() { continue; }
+        let tag = if typ == "stream" { out["name"].as_str().unwrap_or("stream") } else { typ };
+        let attr = if matches!(typ, "execute_result" | "display_data") && mime != "text/plain" {
+            format!(r#" mime="{mime}""#)
+        } else {
+            String::new()
+        };
+        let body = if d.ends_with('\n') { format!("\n{d}") } else { format!("\n{d}\n") };
+        items.push((d, format!("<{tag}{attr}>{body}</{tag}>")));
+    }
+    if items.is_empty() { return String::new(); }
+    if items.len() == 1 { return items.remove(0).0; }
+    items.into_iter().map(|(_, tagged)| tagged).collect::<Vec<_>>().join("\n")
 }

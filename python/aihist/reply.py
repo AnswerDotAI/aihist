@@ -1,6 +1,6 @@
 "Read saved replies as blocks or chat messages, write streamed or completed replies, and show tool and usage blocks as folded Markdown"
 import json, re
-from fastcore.xtras import fenced, fenced_blocks
+from fastcore.xtras import fenced
 from aidialog.msg_parts import (Msg, Text, Thinking, ToolUse, ToolResult, MdStr, FullResponse, split_fence_msgs, think_start, think_end,
     tool_info, tool_text, dict2msg)
 from . import _core
@@ -74,52 +74,14 @@ class Reply:
         "The reply to save for a turn cut short, with `note` after the reply so far"
         return self.r.finish(note)
 
-def _fmt_param(v, mx=40):
-    "Compact display form of one tool arg or result value"
-    s = v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)
-    s = re.sub(r'\n(?:\s*\n)*', '¶', s)
-    if len(s) > mx: s = s[:mx] + '…'
-    return json.dumps(s, ensure_ascii=False)
-
-def _code_span(txt):
-    "Wrap `txt` in a backtick span longer than any backtick run inside it"
-    ticks = '`'*(max(map(len, re.findall('`+', txt)), default=0)+1)
-    pad = ' ' if '`' in txt else ''
-    return f"{ticks}{pad}{txt}{pad}{ticks}"
-
-_code_args = dict(py='code', python='code', bash='cmd')
-
 def tool_md(d):
     "Display markdown for one parsed `{.tool}` block: a folded details div labeled `func(params)→result`, code shown as code, the result fenced unless the block marks it `md`"
-    params = ', '.join(f"{k}={_fmt_param(v)}" for k,v in (d.get('args') or {}).items())
-    res = d.get('result')
-    tail = f"→{_fmt_param(res)}" if res not in (None, '') else ''
-    label = _code_span(f"{d.get('name')}({params}){tail}")
-    code = (d.get('args') or {}).get(_code_args.get(d.get('name'), ''))
-    if code is not None:
-        body = f"Code:\n{fenced(str(code), d.get('name'))}"
-        if str(res or '').strip(): body += f"\n\nOutput:\n\n{fenced(str(res))}"
-    else:
-        body = f"Args:\n{fenced(json.dumps(d.get('args') or {}, indent=2, ensure_ascii=False), 'json')}"
-        if str(res or '').strip(): body += f"\n\n{res}" if d.get('md') else f"\n\nOutput:\n\n{fenced(str(res))}"
-    return fenced(f"## {label}\n\n{body}", ' {.details .tool-usage-details}', ch=':')
+    return _core.tool_md(json.dumps(d, ensure_ascii=False))
 
 def usage_md(d):
     "Display markdown for one parsed `{.usage}` block: a folded details div labeled with cost or tokens"
-    summ = d.get('summary') or (f"${d['cost']:.4f}" if d.get('cost') else f"{d.get('total_tokens', 0):,} tokens")
-    det = d.get('detail') or ' | '.join(f"{k}={v:,}" if isinstance(v, int) else f"{k}={v}" for k,v in d.items() if v and k != 'model')
-    body = f"## {summ}\n\n{_code_span(det)}"
-    return fenced(body, ' {.details .token-usage-details}', ch=':')
+    return _core.usage_md(json.dumps(d, ensure_ascii=False))
 
 def fmt_tools(s):
     "Rewrite fenced JSON tool/usage wire blocks in `s` into folded `::: details` display markdown"
-    out, pos = [], 0
-    for info,body,start,end in fenced_blocks(s):
-        if info not in (tool_info, usage_info): continue
-        try: d = json.loads(body)
-        except Exception: continue
-        out.append(s[pos:start])
-        out.append((tool_md(d) if info == tool_info else usage_md(d)) + '\n')
-        pos = end
-    out.append(s[pos:])
-    return ''.join(out)
+    return _core.fmt_tools(s)

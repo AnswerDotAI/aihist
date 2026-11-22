@@ -9,12 +9,16 @@
 use serde::Deserialize;
 
 pub mod cells;
+pub mod export;
 pub mod input;
 pub mod media;
 pub mod output;
 pub mod paths;
 pub mod reply;
 pub mod tokens;
+
+pub use export::{dlg2md, dlg2md_nb, msg2md, msg2md_in, msg2text, msgs2py};
+pub use reply::{fmt_tools, tool_md, usage_md};
 
 /// What a model can read, as a model catalog entry or fastllm's `get_model_info` gives it
 #[derive(Debug, Clone, Default, Deserialize)]

@@ -1,6 +1,6 @@
 //! The Python extension, `aihist._core`. JSON values cross as strings, which the `aihist` package encodes and decodes.
 
-use aihist::{Caps, cells, input, media, output, reply, tokens};
+use aihist::{Caps, cells, export, input, media, output, reply, tokens};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use serde_json::Value;
@@ -191,6 +191,48 @@ fn write_reply(parts: &str, usage: Option<&str>) -> PyResult<String> {
     Ok(reply::write(&de::<Vec<reply::Part>>(parts)?, usage.as_ref()))
 }
 
+/// Display Markdown for one parsed `{.tool}` block JSON string
+#[pyfunction]
+fn tool_md(block: &str) -> PyResult<String> { Ok(reply::tool_md(&de(block)?)) }
+
+/// Display Markdown for one parsed `{.usage}` block JSON string
+#[pyfunction]
+fn usage_md(block: &str) -> PyResult<String> { Ok(reply::usage_md(&de(block)?)) }
+
+/// Rewrite fenced JSON tool and usage blocks in `text` into folded `::: details` display Markdown
+#[pyfunction]
+fn fmt_tools(text: &str) -> String { reply::fmt_tools(text) }
+
+/// One cell from notebook JSON `nb` as Markdown; `None` for empty code
+#[pyfunction]
+#[pyo3(signature = (nb, language="python", weave=false))]
+fn msg2md(nb: &str, language: &str, weave: bool) -> PyResult<Option<String>> {
+    let nb: Value = de(nb)?;
+    let cell = nb["cells"].as_array().and_then(|c| c.first()).ok_or_else(|| PyValueError::new_err("missing cell"))?;
+    Ok(export::msg2md_in(Some(&nb), cell, language, weave))
+}
+
+/// A notebook JSON as one Markdown document
+#[pyfunction]
+#[pyo3(signature = (nb, language="python", exportfilter=false, weave=false))]
+fn dlg2md(nb: &str, language: &str, exportfilter: bool, weave: bool) -> PyResult<String> {
+    Ok(export::dlg2md_nb(&de(nb)?, language, exportfilter, weave))
+}
+
+/// Input source or plain-text output for one cell JSON
+#[pyfunction]
+#[pyo3(signature = (cell, part="input"))]
+fn msg2text(cell: &str, part: &str) -> PyResult<String> {
+    export::msg2text(&de(cell)?, part).map_err(PyValueError::new_err)
+}
+
+/// Marked exported Python code, or a full commented Python transcript when `full`
+#[pyfunction]
+#[pyo3(signature = (cells, full=false))]
+fn msgs2py(cells: &str, full: bool) -> PyResult<String> {
+    Ok(export::msgs2py(&de::<Vec<Value>>(cells)?, full))
+}
+
 /// A turn's reply as it streams in
 #[pyclass]
 struct Reply(reply::Reply);
@@ -253,5 +295,12 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(set_result, m)?)?;
     m.add_function(wrap_pyfunction!(strip_blocks, m)?)?;
     m.add_function(wrap_pyfunction!(write_reply, m)?)?;
+    m.add_function(wrap_pyfunction!(tool_md, m)?)?;
+    m.add_function(wrap_pyfunction!(usage_md, m)?)?;
+    m.add_function(wrap_pyfunction!(fmt_tools, m)?)?;
+    m.add_function(wrap_pyfunction!(msg2md, m)?)?;
+    m.add_function(wrap_pyfunction!(dlg2md, m)?)?;
+    m.add_function(wrap_pyfunction!(msg2text, m)?)?;
+    m.add_function(wrap_pyfunction!(msgs2py, m)?)?;
     Ok(())
 }

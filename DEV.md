@@ -14,12 +14,13 @@ ship-rs-build
 The root package is a pure Rust crate, published to crates.io. Rust users who depend on it never build PyO3. Its modules are:
 
 - `cells`: one notebook cell as a dialog message, and as a model reads it
+- `export`: Markdown documents (`msg2md`, `dlg2md`), plain-text message parts (`msg2text`), and Python scripts (`msgs2py`)
 - `input`: a prompt's model input, with the examples, CRAFTs, `$` values and warnings that a host supplies
 - `output`: code outputs and tool results as a model reads them
 - `media`: linked-media loading, MIME detection, resizing images, and media tags
 - `paths`: checked filesystem resolution shared with gateway file access
 - `tokens`: approximate token counts
-- `reply`: reading and writing saved replies
+- `reply`: reading, writing and formatting saved replies (`fmt_tools`, `tool_md`, `usage_md`)
 
 The Python extension is the `py` package. It depends on the root crate, is never published, and maturin builds it through `[tool.maturin].manifest-path`. Its functions take and return JSON as strings. The `aihist` Python package in `python/` converts aidialog objects to that JSON and back, in `aihist.reply` and `aihist.hist`. `tests/*.py` tests the Python API, and `cargo test` runs the crate's unit tests.
 

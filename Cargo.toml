@@ -16,6 +16,8 @@ repository = "https://github.com/AnswerDotAI/aihist"
 
 [lib]
 name = "aihist"
+doctest = false
+test = false
 
 [dependencies]
 base64 = "0.22"

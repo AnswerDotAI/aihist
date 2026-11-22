@@ -3,16 +3,12 @@ import ast, base64, binascii, hashlib, json, re
 from ast import literal_eval
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from urllib.parse import quote
 from fastcore.utils import first, listify, loop_first, rtoken_hex
-from fastcore.nbio import render_text
-from fastcore.xtras import fenced
-from aidialog.dialog import Dialog, Attachment, code_output, render_md, export_filter, sprompt, scode, snote, sraw
-from aidialog.dialog import ai_fmt, render_outputs_ai, msgs2py as _marked_py
+from aidialog.dialog import Dialog, Attachment, code_output, sprompt, scode, snote, sraw
 from aidialog.ipynb import get_ipynb, msgs2ipynb
 from aidialog.msg_parts import Msg, Text, ToolUse, ToolResult, data_url, hist2fmt, mk_content, mk_part, resp_part
 from . import _core
-from .reply import fmt2hist, fmt_tools, strip_tools, write_reply
+from .reply import fmt2hist, write_reply
 
 __all__ = ['UNSUPPORTED_MSG', 'im_max', 'IMG_TOKS', 'jwrap', 'to_local_time', 'media_item', 'resize_img', 'prep_img', 'pdf_pages', 'count_tokens',
     'output_parts', 'merge_media', 'tool_result', 'get_refs', 'get_exprs', 'is_nameerr', 'vars_tag', 'vars_hist', 'task_tags', 'warning_tag',
@@ -304,28 +300,14 @@ def dlg2reply(sub):
             msgs += [Msg('assistant', [ToolUse(id=tr.id, name=tr.name, arguments=tr.arguments)]), Msg('tool', [tr])]
     return write_reply(msgs)
 
-def _inline_atts(m, text):
-    "Rewrite `attachment:` refs in `text` as data URIs from `m`'s attachments, making the Markdown self-contained"
-    for a in m.attachments:
-        uri = f'data:{a.content_type};base64,{base64.b64encode(a.data).decode()}'
-        text = text.replace(f'attachment:{a.id}', uri).replace(f'attachment:{quote(a.id)}', uri)
-    return text
+def _nb(d): return get_ipynb(d) if isinstance(d, Dialog) else msgs2ipynb(list(d))
 
 def msg2md(m,
     weave:bool=False, # Code messages contribute only `render_text` over their outputs, as document prose?
     *, language:str='python', # Kernel language for code fences
 ):
     "One message as Markdown, with stored attachments inlined, language fences, output divs and prompt/reply divs; None for empty code"
-    if m.msg_type == snote: return _inline_atts(m, m.content)
-    if m.msg_type == sraw: return fenced(m.content)
-    if m.msg_type == sprompt:
-        parts = [fenced(_inline_atts(m, m.content), ' prompt', ch=':')]
-        if (ai := (m.ai_res or '')).strip(): parts.append(fenced(_inline_atts(m, fmt_tools(ai)), ' reply', ch=':'))
-        return '\n\n'.join(parts)
-    if weave: return render_text(m.output or []) or None
-    parts = [fenced(m.content, language)] if m.content.strip() else []
-    if (outs := render_md(m.output or [])): parts.append(fenced(outs, ' output', ch=':'))
-    return '\n\n'.join(parts) or None
+    return _core.msg2md(json.dumps(msgs2ipynb([m])), language, weave)
 
 def dlg2md(d,
     exportfilter:bool=False, # Keep only the messages `export_filter` selects?
@@ -333,27 +315,12 @@ def dlg2md(d,
     *, language:str='python', # Kernel language for code fences
 ):
     "The dialog as one Markdown document"
-    ms = export_filter(d) if exportfilter else d
-    return '\n\n'.join(filter(None, (msg2md(m, weave=weave, language=language) for m in ms))) + '\n'
+    return _core.dlg2md(json.dumps(_nb(d)), language, exportfilter, weave)
 
 def msg2text(m, part='input'):
     "Input source or plain-text output for copying one message part"
-    if part=='input': return m.content
-    if part!='output': raise ValueError('Choose input or output text')
-    if m.msg_type==sprompt: return ai_fmt(strip_tools(m.ai_res))
-    if m.msg_type==scode: return render_outputs_ai(m.output or [])
-    return ''
+    return _core.msg2text(json.dumps(msgs2ipynb([m])['cells'][0]), part)
 
 def msgs2py(msgs, full=False):
     "Marked code, or a full Python transcript with non-code cells and outputs commented"
-    if not full: return _marked_py(msgs)
-    parts = []
-    def comment(text, prefix='#'): return '\n'.join(f'{prefix} {line}' for line in text.strip().splitlines()) if text else ''
-    for m in msgs:
-        parts.append(f'# --- Cell: {m.id} ({m.msg_type}) ---')
-        parts.append(m.content if m.msg_type==scode else comment(m.content))
-        if m.msg_type==scode:
-            if out := msg2text(m, 'output'): parts.append(comment(out, '#>'))
-        elif m.msg_type==sprompt and m.output:
-            parts.extend(('# --- Assistant Response ---', comment(msg2text(m, 'output'))))
-    return '\n\n'.join(parts)
+    return _core.msgs2py(json.dumps(_nb(msgs)['cells']), full)
