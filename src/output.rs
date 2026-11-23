@@ -1,13 +1,23 @@
 //! Kernel outputs as a model reads them: a code cell's outputs, and the result of a tool call that runs code.
 
-use regex::Regex;
-use serde_json::{Value, json};
-use std::sync::LazyLock;
+use serde_json::{Map, Value};
+#[cfg(feature = "full")] use {crate::{Caps, media}, regex::Regex, serde_json::json, std::sync::LazyLock};
 
-use crate::Caps;
-use crate::cells::text_str;
-use crate::media::{self, IMG_MIMES};
-use crate::tokens::{TEXT_MIMES, first_mime};
+/// Text mimes in reading preference order; the first one present is the one counted
+pub const TEXT_MIMES: [&str; 5] = ["text/markdown", "text/html", "application/javascript", "text/latex", "text/plain"];
+/// Raster MIME types that vision APIs accept, in fastcore's `IMG_MIMES` order. `media::resize` limits them to `IM_MAX`.
+pub const IMG_MIMES: [&str; 3] = ["image/jpeg", "image/png", "image/webp"];
+
+/// Multiline nbformat text (a string, or a list of strings) as one string.
+pub fn text_str(v: &Value) -> String {
+    match v { Value::String(s) => s.clone(), Value::Array(a) => a.iter().filter_map(Value::as_str).collect(), _ => String::new() }
+}
+
+/// The first of `mimes` that `data` has a non-empty value for, with its value, as fastcore's `preferred_out` picks it
+pub fn first_mime<'a>(data: &'a Map<String, Value>, mimes: &[&'static str]) -> Option<(&'static str, &'a Value)> {
+    let full = |v: &&Value| match v { Value::String(s) => !s.is_empty(), Value::Array(a) => !a.is_empty(), Value::Null => false, _ => true };
+    mimes.iter().find_map(|m| data.get(*m).filter(full).map(|v| (*m, v)))
+}
 
 /// `s` without ANSI escape sequences: CSI sequences such as colours, and OSC sequences ending in BEL or `ESC \`
 pub fn strip_ansi(s: &str) -> String {
@@ -153,9 +163,11 @@ fn clean_cli(s: &str) -> String {
 
 /// The MIME type a `ToolResponse` displays as: its content as a list of Responses content parts, which a tool result
 /// passes to the model unchanged
+#[cfg(feature = "full")]
 pub const TOOL_RESPONSE_MIME: &str = "application/vnd.aidialog.tool-response+json";
 
 /// A tool call's result
+#[cfg(feature = "full")]
 pub struct ToolResult {
     /// For the model: the text alone, or Responses content parts when there is media
     pub output: Value,
@@ -169,10 +181,12 @@ pub struct ToolResult {
 
 /// Model-input parts for `images`, each a MIME type and its base64 data: an image's `<media>` tag and the image, or a
 /// `<media-unavailable>` note when a model with `caps` can't read it
+#[cfg(feature = "full")]
 pub fn image_parts(images: &[(&str, String)], caps: &Caps) -> Vec<Value> { images.iter().flat_map(|(mime, b64)| media::output_item(mime, b64, caps)).collect() }
 
 /// A tool result from rendered output `text` and its `image_parts`. When `parts` holds no media, the result is the
 /// text, then each note. Otherwise it's the parts, then the text. `full` and `md` are `Rendered`'s flags.
+#[cfg(feature = "full")]
 pub fn merge(text: String, mut parts: Vec<Value>, full: bool, md: bool) -> ToolResult {
     if !parts.iter().any(|p| p["type"] != "input_text") {
         let notes = parts.iter().filter_map(|p| p["text"].as_str().map(String::from));
@@ -188,6 +202,7 @@ pub fn merge(text: String, mut parts: Vec<Value>, full: bool, md: bool) -> ToolR
 /// `TOOL_RESPONSE_MIME` gives its Responses content parts unchanged and in order. The other outputs give the images a
 /// model with `caps` can read, shrunk to fit, then the text. `code` is `render`'s flag: true when the tool ran code,
 /// false for a kernel's `call`.
+#[cfg(feature = "full")]
 pub fn tool_result<'a>(outs: impl Iterator<Item = (&'a str, &'a Value)>, caps: &Caps, code: bool) -> ToolResult {
     let (given, rest): (Vec<_>, Vec<_>) = outs.partition(|(_, o)| o["data"][TOOL_RESPONSE_MIME].is_array());
     let Rendered { text, images, full, md } = render(rest.into_iter(), false, code);
@@ -196,9 +211,11 @@ pub fn tool_result<'a>(outs: impl Iterator<Item = (&'a str, &'a Value)>, caps: &
     merge(text, parts, full, md)
 }
 
+#[cfg(feature = "full")]
 static DISPLAY_ENV: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\\begin\{(align|equation|gather|multline|eqnarray)").expect("valid regex"));
 
 /// Canonicalize a `text/latex` payload to `\(...\)`/`\[...\]` delimiters, or `$...$`/`$$...$$` when `dollars`
+#[cfg(feature = "full")]
 pub fn normalize_text_latex(s: &str, dollars: bool) -> String {
     if s.is_empty() { return String::new(); }
     let (disp, tex) = if let Some(inner) = s.strip_prefix(r"\[").and_then(|t| t.strip_suffix(r"\]")) { (true, inner) }
@@ -215,6 +232,7 @@ pub fn normalize_text_latex(s: &str, dollars: bool) -> String {
 }
 
 /// Concatenate stdout, stderr and markdown streams, keeping `error` and `execute_result` outputs at the end
+#[cfg(feature = "full")]
 pub(crate) fn concat_streams(outputs: &[Value]) -> Vec<Value> {
     let (mut stdout, mut stderr, mut markdown) = (String::new(), String::new(), String::new());
     let (mut has_out, mut has_err, mut has_md) = (false, false, false);
@@ -242,6 +260,7 @@ pub(crate) fn concat_streams(outputs: &[Value]) -> Vec<Value> {
 }
 
 /// Preferred MIME type and content for a Jupyter output dict
+#[cfg(feature = "full")]
 pub(crate) fn preferred_msg_out(out: &Value, html1st: bool, include_imgs: bool) -> (&'static str, String) {
     match out["output_type"].as_str().unwrap_or("") {
         "stream" => ("text/plain", text_str(&out["text"])),
@@ -268,6 +287,7 @@ pub(crate) fn preferred_msg_out(out: &Value, html1st: bool, include_imgs: bool) 
 }
 
 /// Plain-text rendering of a Jupyter output list, as `aidialog.dialog.render_outputs_ai`
+#[cfg(feature = "full")]
 pub fn render_outputs_ai(outputs: &[Value], dollars: bool) -> String {
     concat_streams(outputs)
         .iter()
@@ -286,6 +306,7 @@ pub fn render_outputs_ai(outputs: &[Value], dollars: bool) -> String {
 }
 
 /// Render notebook outputs as Markdown: text in `output` fences, HTML in `{=html}`, Markdown inlined, images as data URIs
+#[cfg(feature = "full")]
 pub fn render_md(outputs: &[Value], html1st: bool) -> String {
     let (mut parts, mut buf) = (Vec::new(), String::new());
     let flush = |buf: &mut String, parts: &mut Vec<String>| {
@@ -327,6 +348,7 @@ pub fn render_md(outputs: &[Value], html1st: bool) -> String {
 }
 
 /// Concise ANSI-stripped text for outputs, wrapped in XML-ish tags when multiple outputs appear
+#[cfg(feature = "full")]
 pub fn render_text(outputs: &[Value], html1st: bool, cap_tb: bool) -> String {
     let mut items: Vec<(String, String)> = Vec::new();
     for out in concat_streams(outputs) {

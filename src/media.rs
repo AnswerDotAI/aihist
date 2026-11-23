@@ -38,8 +38,7 @@ pub async fn load(reference: &str, ctx: &Context<'_>) -> Result<Vec<u8>, String>
 
 /// Largest image area, in pixels, sent to a model: four OpenAI high-detail tiles
 pub const IM_MAX: u32 = 768 * 768;
-/// Raster MIME types that vision APIs accept, in fastcore's `IMG_MIMES` order. `resize` limits them to `IM_MAX`.
-pub const IMG_MIMES: [&str; 3] = ["image/jpeg", "image/png", "image/webp"];
+pub use crate::output::IMG_MIMES;
 /// The note for media of a type the model can't read, with `{mime}` standing for the type
 pub const UNSUPPORTED: &str =
     "An unsupported media type was included in the context: {mime}. Please instruct the user to switch to a model that supports this media type.";

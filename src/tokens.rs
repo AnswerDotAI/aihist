@@ -14,14 +14,7 @@ use crate::output::strip_ansi;
 pub const IMG_TOKENS: u64 = 1200;
 /// Tokens charged per PDF page
 pub const PDF_PAGE_TOKENS: u64 = 2663;
-/// Text mimes in reading preference order; the first one present is the one counted
-pub const TEXT_MIMES: [&str; 5] = ["text/markdown", "text/html", "application/javascript", "text/latex", "text/plain"];
-
-/// The first of `mimes` that `data` has a non-empty value for, with its value, as fastcore's `preferred_out` picks it
-pub fn first_mime<'a>(data: &'a Map<String, Value>, mimes: &[&'static str]) -> Option<(&'static str, &'a Value)> {
-    let full = |v: &&Value| match v { Value::String(s) => !s.is_empty(), Value::Array(a) => !a.is_empty(), Value::Null => false, _ => true };
-    mimes.iter().find_map(|m| data.get(*m).filter(full).map(|v| (*m, v)))
-}
+pub use crate::output::{TEXT_MIMES, first_mime};
 
 /// Approximate tokens in `text`, within about 20% of o200k for most notebook cells. A run of
 /// ASCII alphanumerics counts one token up to 12 chars; longer runs count `len/1.7` with a

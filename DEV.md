@@ -11,7 +11,7 @@ ship-rs-build
 
 ## Layout
 
-The root package is a pure Rust crate, published to crates.io. Rust users who depend on it never build PyO3. Its modules are:
+The root package is a pure Rust crate, published to crates.io. Rust users who depend on it never build PyO3. `default = ["full"]` enables all modules; `default-features = false` exposes `output` (core `render`/`strip_ansi`/`keep_ends`/MIME helpers) and `paths` (`realpath`) with only `serde_json`. Its modules are:
 
 - `cells`: one notebook cell as a dialog message, and as a model reads it
 - `export`: Markdown documents (`msg2md`, `dlg2md`), plain-text message parts (`msg2text`), and Python scripts (`msgs2py`)

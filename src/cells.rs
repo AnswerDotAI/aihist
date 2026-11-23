@@ -31,10 +31,7 @@ pub fn stored_atts<'a>(nb: &'a Value, cell: &'a Value) -> Option<&'a Map<String,
     nb["metadata"]["attachments"][cell["id"].as_str()?].as_object()
 }
 
-/// Multiline nbformat text (a string, or a list of strings) as one string.
-pub fn text_str(v: &Value) -> String {
-    match v { Value::String(s) => s.clone(), Value::Array(a) => a.iter().filter_map(Value::as_str).collect(), _ => String::new() }
-}
+pub use crate::output::text_str;
 
 /// Python's truthiness, for metadata flags such as `skipped: 1`
 pub fn truthy(v: &Value) -> bool {

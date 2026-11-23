@@ -38,7 +38,7 @@ pub struct Prompt {
     pub craft_errors: Vec<String>,
     /// What the model can read
     pub caps: Caps,
-    /// The system prompt that the host sends with the input. Only its size counts here.
+    /// System instructions prepended to the input as a `developer` message.
     pub instructions: Option<String>,
     /// Example notebooks, which go before everything else. Their last message ends a prefix that a provider can cache.
     pub examples: Vec<Value>,
@@ -201,7 +201,7 @@ fn model_call_ids(items: &mut [Value]) {
     }
 }
 
-/// The model input for prompt `p`: the examples, the CRAFTs, the `$` values, the dialog's path, the cells above the
+/// The model input for prompt `p`: any developer instructions, the examples, the CRAFTs, the `$` values, the dialog's path, the cells above the
 /// prompt that fit, any warnings, then the prompt
 pub async fn build(p: &Prompt, ctx: &media::Context<'_>) -> Result<Vec<Value>, String> {
     let all = p.nb["cells"].as_array().ok_or("the notebook has no cells")?;
@@ -258,6 +258,9 @@ pub async fn build(p: &Prompt, ctx: &media::Context<'_>) -> Result<Vec<Value>, S
         );
     }
     let mut input = turns(pre.into_iter().chain(hist).chain(last).map(|e| e.turn).collect());
+    if let Some(s) = p.instructions.as_deref().filter(|s| !s.is_empty()) {
+        input.insert(0, json!({"type": "message", "role": "developer", "content": [text(s.to_owned())]}));
+    }
     model_call_ids(&mut input);
     Ok(input)
 }

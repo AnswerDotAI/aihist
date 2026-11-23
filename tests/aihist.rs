@@ -1,10 +1,10 @@
-use std::io::Write;
-use base64::{Engine, engine::general_purpose::STANDARD};
-use serde_json::{Map, Value, json};
+#[cfg(feature = "full")] use std::io::Write;
+#[cfg(feature = "full")] use base64::{Engine, engine::general_purpose::STANDARD};
+#[cfg(feature = "full")] use serde_json::{Map, Value, json};
 
 use aihist::output::keep_ends;
-use aihist::tokens::{IMG_TOKENS, PDF_PAGE_TOKENS, bundle, cell, count, pdf_pages};
-use aihist::{dlg2md_nb, msg2md_in, msg2text, msgs2py};
+#[cfg(feature = "full")] use aihist::tokens::{IMG_TOKENS, PDF_PAGE_TOKENS, bundle, cell, count, pdf_pages};
+#[cfg(feature = "full")] use aihist::{dlg2md_nb, msg2md_in, msg2text, msgs2py};
 
 #[test]
 fn keep_ends_cuts_the_middle_at_char_boundaries() {
@@ -13,6 +13,7 @@ fn keep_ends_cuts_the_middle_at_char_boundaries() {
     assert_eq!(kept, "€a\n[4 bytes of output removed]\ncd€");
 }
 
+#[cfg(feature = "full")]
 #[test]
 fn counts_by_character_class() {
     assert_eq!(count("def fetch_daily(lat, lon): pass"), 9);
@@ -22,6 +23,7 @@ fn counts_by_character_class() {
     assert_eq!(count("  \n\t"), 0);
 }
 
+#[cfg(feature = "full")]
 #[test]
 fn pdf_pages_reads_clear_and_object_streams() {
     assert_eq!(pdf_pages(b"%PDF-1.4\n1 0 obj << /Type /Pages /Kids [] /Count 3 >> endobj"), 3);
@@ -34,6 +36,7 @@ fn pdf_pages_reads_clear_and_object_streams() {
     assert_eq!(pdf_pages(b"not a pdf"), 0);
 }
 
+#[cfg(feature = "full")]
 #[test]
 fn media_charge_by_constant() {
     let data: Map<String, Value> = serde_json::from_value(json!({"text/plain": "<Figure>", "image/png": "aGk="})).unwrap();
@@ -45,6 +48,7 @@ fn media_charge_by_constant() {
     assert_eq!(cell(&cell_v, None), json!({"source": 2}));
 }
 
+#[cfg(feature = "full")]
 #[test]
 fn markdown_text_and_python_exports() {
     let reply = "Before.\n\n```json {.tool}\n{\"id\":\"t1\",\"name\":\"py\",\"args\":{\"code\":\"1+1\"},\"result\":\"2\"}\n```\n\nDone. ![](attachment:reply%20plot.png)";
