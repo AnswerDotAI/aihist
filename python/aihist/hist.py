@@ -1,8 +1,6 @@
 "Dialogs as model input, chat messages and Markdown documents, and chat messages back as dialogs"
 import ast, base64, binascii, hashlib, json, re
 from ast import literal_eval
-from datetime import datetime
-from zoneinfo import ZoneInfo
 from fastcore.utils import first, listify, loop_first, rtoken_hex
 from aidialog.dialog import Dialog, Attachment, code_output, sprompt, scode, snote, sraw
 from aidialog.ipynb import get_ipynb, msgs2ipynb
@@ -10,9 +8,9 @@ from aidialog.msg_parts import Msg, Text, ToolUse, ToolResult, data_url, hist2fm
 from . import _core
 from .reply import fmt2hist, write_reply
 
-__all__ = ['UNSUPPORTED_MSG', 'im_max', 'IMG_TOKS', 'jwrap', 'to_local_time', 'media_item', 'resize_img', 'prep_img', 'pdf_pages', 'count_tokens',
+__all__ = ['UNSUPPORTED_MSG', 'im_max', 'IMG_TOKS', 'jwrap', 'media_item', 'resize_img', 'prep_img', 'pdf_pages', 'count_tokens',
     'output_parts', 'merge_media', 'tool_result', 'get_refs', 'get_exprs', 'is_nameerr', 'vars_tag', 'vars_hist', 'task_tags', 'warning_tag',
-    'local_time', 'cell_turn', 'cell_media', 'cell_reply', 'is_shown', 'references', 'hist_xml', 'to_media', 'to_parts', 'tool_call', 'build', 'dlg2hist', 'reply2chat', 'dlg2chat', 'chat2dlg', 'reply2dlg',
+    'cell_turn', 'cell_media', 'cell_reply', 'is_shown', 'references', 'hist_xml', 'to_media', 'to_parts', 'tool_call', 'build', 'dlg2hist', 'reply2chat', 'dlg2chat', 'chat2dlg', 'reply2dlg',
     'dlg2reply', 'msg2md', 'dlg2md', 'msg2text', 'msgs2py']
 
 UNSUPPORTED_MSG,im_max,IMG_TOKS = _core.UNSUPPORTED,_core.IM_MAX,_core.IMG_TOKENS
@@ -38,13 +36,6 @@ def _parts(parts):
 def jwrap(txts:list=['']):
     "Wrap plain `txt` in a minimal Jupyter-style cell output"
     return [dict(output_type='stream', name='stdout', text=txt) for txt in listify(txts)]
-
-def to_local_time(time_str, tz='UTC'):
-    "Convert ISO time string to local timezone"
-    if not time_str: return ''
-    try: dt = datetime.fromisoformat(time_str)
-    except ValueError: return ''
-    return dt.astimezone(ZoneInfo(tz)).isoformat()
 
 def media_item(media_type, media_id, data, aim_info, mime=None):
     "Media `data`, bytes or a function that loads them, as `[xml_tag, data]`, or `[media-unavailable tag]` when the model can't read it"
@@ -113,18 +104,13 @@ def vars_hist(aim_info, recs=None):
     "One history turn holding the values of `eval` records `recs`, then its acknowledgement; `[]` when every name is undefined"
     return [c, _core.VARS_REPLY] if (c := _vars(aim_info, recs)) else []
 
-def task_tags(task:str, sid=None, time=None, tz='UTC'):
-    "A prompt as the model reads it: the instruction to answer, then the `<prompt>` with its `sid` and local run time"
-    return _core.envelope(task, sid or '', to_local_time(time, tz) or None)
+def task_tags(task:str, sid=None):
+    "A prompt as the model reads it: the instruction to answer, then the `<prompt>` with its `sid`"
+    return _core.envelope(task, sid or '')
 
 def warning_tag(warning:str):
     "`warning` in a `<system-reminder>`, or None when it's empty"
     return _core.reminder(warning) if warning else None
-
-def local_time(m):
-    "Message `m`'s `time_run` in its dialog's time zone; '' when it has none"
-    if not (t := getattr(m, 'time_run', '')): return ''
-    return to_local_time(t, getattr(m.dlg, 'timezone', 'UTC') if m.dlg else 'UTC')
 
 def _cell(m):
     "A temporary notebook and its cell as JSON for `_core`"
@@ -133,7 +119,7 @@ def _cell(m):
 
 def cell_turn(m, aim_info=None):
     "Canonical model parts and normalized saved reply for one message, without fitting or shortening call IDs"
-    return json.loads(_core.cell_turn(*_cell(m), _caps(aim_info), local_time(m) or None, getattr(m.dlg, 'path_', None) or ''))
+    return json.loads(_core.cell_turn(*_cell(m), _caps(aim_info), getattr(m.dlg, 'path_', None) or ''))
 
 def cell_media(m, aim_info=None):
     "Canonical Responses media parts for one message"
@@ -153,8 +139,8 @@ def references(nb, prompt, crafts=()):
     return json.loads(_core.references(json.dumps(nb), prompt, json.dumps(crafts)))
 
 def hist_xml(m):
-    "Message `m` as the XML a model reads, with its local run time"
-    return _core.cell_xml(json.dumps(msgs2ipynb([m])['cells'][0]), local_time(m) or None)
+    "Message `m` as the XML a model reads"
+    return _core.cell_xml(json.dumps(msgs2ipynb([m])['cells'][0]))
 
 def to_media(m, aim_info=None):
     "The media message `m` shows a model: referenced attachments, marked links, then code output images"
@@ -162,7 +148,7 @@ def to_media(m, aim_info=None):
 
 def to_parts(m, aim_info=None):
     "Message `m` as history parts: its media, then its XML"
-    return _content(json.loads(_core.cell_parts(*_cell(m), _caps(aim_info), local_time(m) or None, getattr(m.dlg, 'path_', None) or '')))
+    return _content(json.loads(_core.cell_parts(*_cell(m), _caps(aim_info), getattr(m.dlg, 'path_', None) or '')))
 
 def _dotted_name(s): return bool(s) and all(p.isidentifier() for p in s.split('.'))
 
@@ -234,7 +220,7 @@ def dlg2chat(
     if dups := {i for i in ids if ids.count(i)>1}: raise ValueError(f"duplicate tool call id(s): {', '.join(sorted(dups))}")
     return msgs
 
-_env_pat = re.compile(r'<instructions>.*?</instructions>\n<prompt(?: sid="(?P<sid>[^"]*)")?(?: time="[^"]*")?>(?P<task>.*)</prompt>$', re.S)
+_env_pat = re.compile(r'<instructions>.*?</instructions>\n<prompt(?: sid="(?P<sid>[^"]*)")?>(?P<task>.*)</prompt>$', re.S)
 def chat2dlg(
     msgs, # Canonical messages, e.g. from `dlg2chat`
     name, # Dialog name

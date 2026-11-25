@@ -88,21 +88,19 @@ pub fn ai_fmt(s: &str) -> String {
     if s.is_empty() { r#"<output result="pending" reason="incomplete"/>"#.into() } else { s.into() }
 }
 
-/// A prompt as the model reads it: an instruction to answer, then the prompt with its message id and `time`
-pub fn envelope(task: &str, sid: &str, time: Option<&str>) -> String {
-    let mut attrs = if sid.is_empty() { String::new() } else { xml_attr("sid", sid) };
-    if let Some(t) = time { attrs += &xml_attr("time", t) }
+/// A prompt as the model reads it: an instruction to answer, then the prompt with its message id
+pub fn envelope(task: &str, sid: &str) -> String {
+    let attrs = if sid.is_empty() { String::new() } else { xml_attr("sid", sid) };
     format!("<instructions>Respond to the request in the `prompt` below.</instructions>\n<prompt{attrs}>{task}</prompt>")
 }
 
 /// `m` as the XML a model reads: a prompt in its envelope, or a `<markdown>`, `<code>` or `<raw>` element with the
-/// cell's id, its `time`, its nbdev metadata directives, and any output
-pub fn xml(cell: &Value, m: &Msg, time: Option<&str>) -> String {
+/// cell's id, its nbdev metadata directives, and any output
+pub fn xml(cell: &Value, m: &Msg) -> String {
     let id = cell["id"].as_str().unwrap_or_default();
-    if m.typ == "prompt" { return envelope(&m.content, id, time); }
+    if m.typ == "prompt" { return envelope(&m.content, id); }
     let tag = if m.typ == "note" { "markdown" } else { m.typ };
     let mut attrs = if id.is_empty() { String::new() } else { xml_attr("id", id) };
-    if let Some(t) = time { attrs += &xml_attr("time", t) }
     for (k, v) in cell["metadata"]["nbdev"].as_object().into_iter().flatten() {
         match v.as_str() { Some("true" | "") => attrs += &format!(" {k}"), Some(v) => attrs += &xml_attr(k, v), None => {} }
     }
@@ -137,10 +135,10 @@ pub fn shown(cell: &Value) -> bool {
     !truthy(&meta["skipped"]) && !(cell["cell_type"] == "raw" && truthy(&meta["rec_kind"]))
 }
 
-/// Cell `cell` of notebook `nb` as a model reads it: its media, then its XML, with its host-supplied timestamp.
-pub async fn parts(nb: &Value, cell: &Value, caps: &Caps, time: Option<&str>, ctx: &media::Context<'_>) -> Vec<Value> {
+/// Cell `cell` of notebook `nb` as a model reads it: its media, then its XML.
+pub async fn parts(nb: &Value, cell: &Value, caps: &Caps, ctx: &media::Context<'_>) -> Vec<Value> {
     let m = msg(cell);
     let mut res = media(nb, cell, caps, ctx).await;
-    res.push(text(xml(cell, &m, time)));
+    res.push(text(xml(cell, &m)));
     res
 }

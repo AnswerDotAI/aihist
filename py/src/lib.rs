@@ -28,13 +28,13 @@ fn build(py: Python<'_>, prompt: &str, media_path: Option<PathBuf>) -> PyResult<
 
 /// Cell `cell` of notebook `nb` as a model reads it: its media, then its XML
 #[pyfunction]
-#[pyo3(signature = (nb, cell, caps_, time=None, media_path=None))]
-fn cell_parts(py: Python<'_>, nb: &str, cell: &str, caps_: &str, time: Option<&str>, media_path: Option<PathBuf>) -> PyResult<String> {
+#[pyo3(signature = (nb, cell, caps_, media_path=None))]
+fn cell_parts(py: Python<'_>, nb: &str, cell: &str, caps_: &str, media_path: Option<PathBuf>) -> PyResult<String> {
     let (nb, cell, caps): (Value, Value, Caps) = (de(nb)?, de(cell)?, caps(caps_)?);
-    let (path, time) = (media_path.unwrap_or_default(), time.map(String::from));
+    let path = media_path.unwrap_or_default();
     Ok(py.detach(move || {
         let ctx = media::Context { http: &HTTP, root: None, path: &path };
-        ser(RUNTIME.block_on(cells::parts(&nb, &cell, &caps, time.as_deref(), &ctx)))
+        ser(RUNTIME.block_on(cells::parts(&nb, &cell, &caps, &ctx)))
     }))
 }
 
@@ -52,13 +52,13 @@ fn cell_media(py: Python<'_>, nb: &str, cell: &str, caps_: &str, media_path: Opt
 
 /// A cell's model parts and normalized saved reply.
 #[pyfunction]
-#[pyo3(signature = (nb, cell, caps_, time=None, media_path=None))]
-fn cell_turn(py: Python<'_>, nb: &str, cell: &str, caps_: &str, time: Option<&str>, media_path: Option<PathBuf>) -> PyResult<String> {
+#[pyo3(signature = (nb, cell, caps_, media_path=None))]
+fn cell_turn(py: Python<'_>, nb: &str, cell: &str, caps_: &str, media_path: Option<PathBuf>) -> PyResult<String> {
     let (nb, cell, caps): (Value, Value, Caps) = (de(nb)?, de(cell)?, caps(caps_)?);
-    let (path, time) = (media_path.unwrap_or_default(), time.map(String::from));
+    let path = media_path.unwrap_or_default();
     Ok(py.detach(move || {
         let ctx = media::Context { http: &HTTP, root: None, path: &path };
-        ser(RUNTIME.block_on(input::turn(&nb, &cell, &caps, time.as_deref(), &ctx)))
+        ser(RUNTIME.block_on(input::turn(&nb, &cell, &caps, &ctx)))
     }))
 }
 
@@ -84,8 +84,7 @@ fn media_refs(cell: &str) -> PyResult<Vec<String>> { Ok(cells::media_refs(&de(ce
 
 /// Cell `cell` as the XML a model reads
 #[pyfunction]
-#[pyo3(signature = (cell, time=None))]
-fn cell_xml(cell: &str, time: Option<&str>) -> PyResult<String> { let cell = de(cell)?; Ok(cells::xml(&cell, &cells::msg(&cell), time)) }
+fn cell_xml(cell: &str) -> PyResult<String> { let cell = de(cell)?; Ok(cells::xml(&cell, &cells::msg(&cell))) }
 
 /// Whether the model sees `cell`
 #[pyfunction]
@@ -99,10 +98,10 @@ fn cell_reply(cell: &str) -> PyResult<Option<String>> { let m = cells::msg(&de(c
 #[pyfunction]
 fn cell_refs(cell: &str) -> PyResult<String> { let r = cells::refs(&de(cell)?); Ok(ser(serde_json::json!({"vars": r.vars, "cmds": r.cmds, "tools": r.tools}))) }
 
-/// A prompt as the model reads it: the instruction to answer, then the prompt with its id `sid` and `time`
+/// A prompt as the model reads it: the instruction to answer, then the prompt with its id `sid`
 #[pyfunction]
-#[pyo3(signature = (task, sid="", time=None))]
-fn envelope(task: &str, sid: &str, time: Option<&str>) -> String { cells::envelope(task, sid, time) }
+#[pyo3(signature = (task, sid=""))]
+fn envelope(task: &str, sid: &str) -> String { cells::envelope(task, sid) }
 
 /// `s` in a `<system-reminder>`, as a note for the model that the user may need to know about
 #[pyfunction]

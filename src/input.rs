@@ -42,8 +42,6 @@ pub struct Prompt {
     pub instructions: Option<String>,
     /// Example notebooks, which go before everything else. Their last message ends a prefix that a provider can cache.
     pub examples: Vec<Value>,
-    /// Each cell's host-supplied timestamp, by cell id
-    pub times: Map<String, Value>,
 }
 
 /// A dialog whose cells go into the context as a CRAFT
@@ -74,19 +72,19 @@ impl Entry {
 }
 
 /// One cell's model parts and its normalized saved reply, with complete call IDs.
-pub async fn turn(nb: &Value, cell: &Value, caps: &Caps, time: Option<&str>, ctx: &media::Context<'_>) -> Turn {
-    Turn { parts: parts(nb, cell, caps, time, ctx).await, reply: crate::cells::is_prompt(cell).then(|| ai_fmt(&msg(cell).out)), cache: false }
+pub async fn turn(nb: &Value, cell: &Value, caps: &Caps, ctx: &media::Context<'_>) -> Turn {
+    Turn { parts: parts(nb, cell, caps, ctx).await, reply: crate::cells::is_prompt(cell).then(|| ai_fmt(&msg(cell).out)), cache: false }
 }
 
-/// Cell `cell` of notebook `nb` as a message, with its host-supplied timestamp.
-async fn entry(nb: &Value, cell: &Value, caps: &Caps, time: Option<&str>, ctx: &media::Context<'_>) -> Entry {
-    Entry { turn: turn(nb, cell, caps, time, ctx).await, tokens: scaled(tokens::total(cell, stored_atts(nb, cell))) }
+/// Cell `cell` of notebook `nb` as a message.
+async fn entry(nb: &Value, cell: &Value, caps: &Caps, ctx: &media::Context<'_>) -> Entry {
+    Entry { turn: turn(nb, cell, caps, ctx).await, tokens: scaled(tokens::total(cell, stored_atts(nb, cell))) }
 }
 
 /// The messages of every cell in `nb` that the model sees
 async fn shown_entries(nb: &Value, caps: &Caps, ctx: &media::Context<'_>) -> Vec<Entry> {
     let mut res = vec![];
-    for c in nb["cells"].as_array().into_iter().flatten().filter(|c| shown(c)) { res.push(entry(nb, c, caps, None, ctx).await); }
+    for c in nb["cells"].as_array().into_iter().flatten().filter(|c| shown(c)) { res.push(entry(nb, c, caps, ctx).await); }
     res
 }
 
@@ -219,7 +217,7 @@ pub async fn build(p: &Prompt, ctx: &media::Context<'_>) -> Result<Vec<Value>, S
             pre.extend(shown_entries(&c.nb, caps, &craft_ctx).await);
             pre.push(Entry::text("</craft-block>".into()));
         }
-        let mut end = Entry::text(envelope("End of CRAFTs.", "crafts", None));
+        let mut end = Entry::text(envelope("End of CRAFTs.", "crafts"));
         end.turn.reply = Some("Ok!".into());
         end.turn.cache = true;
         pre.push(end);
@@ -230,9 +228,8 @@ pub async fn build(p: &Prompt, ctx: &media::Context<'_>) -> Result<Vec<Value>, S
         pre.push(Entry { turn: Turn { parts: vparts, reply: Some(VARS_REPLY.into()), cache: false }, tokens });
     }
     if !p.path.is_empty() { pre.push(Entry::text(format!("<dialog{}/>", xml_attr("path", &p.path)))) }
-    let time = |c: &Value| p.times.get(c["id"].as_str().unwrap_or_default()).and_then(Value::as_str);
     let mut last: Vec<Entry> = warning(&undef, &p.tool_errors, &p.craft_errors).map(Entry::text).into_iter().collect();
-    let mut target = entry(&p.nb, &all[at], caps, time(&all[at]), ctx).await;
+    let mut target = entry(&p.nb, &all[at], caps, ctx).await;
     target.turn.reply = None;
     last.push(target);
     let (mut boundary, mut after_large) = (false, false);
@@ -250,7 +247,7 @@ pub async fn build(p: &Prompt, ctx: &media::Context<'_>) -> Result<Vec<Value>, S
     let budget = (caps.max_input_tokens.unwrap_or(WINDOW) as f64 * FILL) as u64;
     let (selected, dropped) = fit(hist, budget.saturating_sub(fixed));
     let mut hist = vec![];
-    for i in selected { hist.push(entry(&p.nb, &all[i], caps, time(&all[i]), ctx).await); }
+    for i in selected { hist.push(entry(&p.nb, &all[i], caps, ctx).await); }
     if dropped > 0 {
         last.insert(
             0,
