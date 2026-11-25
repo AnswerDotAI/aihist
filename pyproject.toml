@@ -1,5 +1,5 @@
 [build-system]
-requires = ["maturin>=1.0,<2.0", "fastws-cli>=0.0.25"]
+requires = ["maturin>=1.0,<2.0", "fastws-cli>=0.0.42"]
 build-backend = "fastws.build_backend"
 
 [project]
@@ -14,7 +14,7 @@ classifiers = ["Programming Language :: Rust", "Programming Language :: Python :
 dependencies = ['aidialog>=0.0.42', 'fastcore>=2.2.31']
 
 [project.optional-dependencies]
-test = ["pytest"]
+test = ["fastws-cli>=0.0.42", "pytest"]
 dev = ["fastship>=0.0.11", "maturin>=1.0,<2.0", "aihist[test]"]
 
 [project.urls]
