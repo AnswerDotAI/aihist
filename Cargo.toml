@@ -21,18 +21,18 @@ test = false
 
 [features]
 default = ["full"]
+# Dialog export, reply formatting and output rendering, with no network, file or image dependencies: builds for wasm32
+text = ["dep:percent-encoding", "dep:regex", "dep:serde"]
 full = [
+    "text",
     "dep:base64",
     "dep:data-encoding",
     "dep:flate2",
     "dep:image",
     "dep:md-5",
     "dep:mime_guess",
-    "dep:percent-encoding",
-    "dep:regex",
     "dep:reqwest",
     "dep:rgapi",
-    "dep:serde",
 ]
 
 [dependencies]

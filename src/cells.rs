@@ -3,16 +3,18 @@
 
 use regex::Regex;
 use serde_json::{Map, Value};
-use std::collections::HashSet;
+#[cfg(feature = "full")] use std::collections::HashSet;
 use std::sync::LazyLock;
 
-use crate::Caps;
-use crate::media::{self, IMG_MIMES, text, xml_attr};
-use crate::{output, reply, tokens};
+#[cfg(feature = "full")] use crate::Caps;
+#[cfg(feature = "full")] use crate::media::{self, IMG_MIMES, text, xml_attr};
+#[cfg(feature = "full")] use crate::tokens;
+use crate::{output, reply};
 
-pub use rgapi::cell_refs as refs;
+#[cfg(feature = "full")] pub use rgapi::cell_refs as refs;
 
 /// Attachments a message refers to: `![...](attachment:id)` and `<!-- last_output:uuid -->`
+#[cfg(feature = "full")]
 static ATT_REF: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"!\[[^\]]*\]\(attachment:([^)]+)\)|<!-- last_output:([0-9a-f-]{36}) -->").expect("a valid regex"));
 
@@ -89,6 +91,7 @@ pub fn ai_fmt(s: &str) -> String {
 }
 
 /// A prompt as the model reads it: an instruction to answer, then the prompt with its message id
+#[cfg(feature = "full")]
 pub fn envelope(task: &str, sid: &str) -> String {
     let attrs = if sid.is_empty() { String::new() } else { xml_attr("sid", sid) };
     format!("<instructions>Respond to the request in the `prompt` below.</instructions>\n<prompt{attrs}>{task}</prompt>")
@@ -96,6 +99,7 @@ pub fn envelope(task: &str, sid: &str) -> String {
 
 /// `m` as the XML a model reads: a prompt in its envelope, or a `<markdown>`, `<code>` or `<raw>` element with the
 /// cell's id, its nbdev metadata directives, and any output
+#[cfg(feature = "full")]
 pub fn xml(cell: &Value, m: &Msg) -> String {
     let id = cell["id"].as_str().unwrap_or_default();
     if m.typ == "prompt" { return envelope(&m.content, id); }
@@ -109,6 +113,7 @@ pub fn xml(cell: &Value, m: &Msg) -> String {
 }
 
 /// Referenced attachments, marked links, then code output images.
+#[cfg(feature = "full")]
 pub async fn media(nb: &Value, cell: &Value, caps: &Caps, ctx: &media::Context<'_>) -> Vec<Value> {
     let source = content(cell);
     let refs: HashSet<&str> =
@@ -136,6 +141,7 @@ pub fn shown(cell: &Value) -> bool {
 }
 
 /// Cell `cell` of notebook `nb` as a model reads it: its media, then its XML.
+#[cfg(feature = "full")]
 pub async fn parts(nb: &Value, cell: &Value, caps: &Caps, ctx: &media::Context<'_>) -> Vec<Value> {
     let m = msg(cell);
     let mut res = media(nb, cell, caps, ctx).await;
