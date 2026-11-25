@@ -6,19 +6,28 @@
 //! tool results, `media` prepares images and other media, and `tokens` estimates token counts. `reply` reads and
 //! writes the saved reply format.
 
-#[cfg(feature = "full")] use serde::Deserialize;
+#[cfg(feature = "full")]
+use serde::Deserialize;
 
-#[cfg(feature = "full")] pub mod cells;
-#[cfg(feature = "full")] pub mod export;
-#[cfg(feature = "full")] pub mod input;
-#[cfg(feature = "full")] pub mod media;
+#[cfg(feature = "full")]
+pub mod cells;
+#[cfg(feature = "full")]
+pub mod export;
+#[cfg(feature = "full")]
+pub mod input;
+#[cfg(feature = "full")]
+pub mod media;
 pub mod output;
 pub mod paths;
-#[cfg(feature = "full")] pub mod reply;
-#[cfg(feature = "full")] pub mod tokens;
+#[cfg(feature = "full")]
+pub mod reply;
+#[cfg(feature = "full")]
+pub mod tokens;
 
-#[cfg(feature = "full")] pub use export::{dlg2md, dlg2md_nb, msg2md, msg2md_in, msg2text, msgs2py};
-#[cfg(feature = "full")] pub use reply::{fmt_tools, tool_md, usage_md};
+#[cfg(feature = "full")]
+pub use export::{dlg2md, dlg2md_nb, msg2md, msg2md_in, msg2text, msgs2py};
+#[cfg(feature = "full")]
+pub use reply::{fmt_tools, tool_md, usage_md};
 
 /// What a model can read, as a model catalog entry or fastllm's `get_model_info` gives it
 #[cfg(feature = "full")]

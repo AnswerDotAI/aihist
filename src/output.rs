@@ -1,7 +1,8 @@
 //! Kernel outputs as a model reads them: a code cell's outputs, and the result of a tool call that runs code.
 
 use serde_json::{Map, Value};
-#[cfg(feature = "full")] use {crate::{Caps, media}, regex::Regex, serde_json::json, std::sync::LazyLock};
+#[cfg(feature = "full")]
+use {crate::{Caps, media}, regex::Regex, serde_json::json, std::sync::LazyLock};
 
 /// Text mimes in reading preference order; the first one present is the one counted
 pub const TEXT_MIMES: [&str; 5] = ["text/markdown", "text/html", "application/javascript", "text/latex", "text/plain"];
@@ -218,16 +219,17 @@ static DISPLAY_ENV: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\\begin\{(a
 #[cfg(feature = "full")]
 pub fn normalize_text_latex(s: &str, dollars: bool) -> String {
     if s.is_empty() { return String::new(); }
-    let (disp, tex) = if let Some(inner) = s.strip_prefix(r"\[").and_then(|t| t.strip_suffix(r"\]")) { (true, inner) }
-    else if let Some(inner) = s.strip_prefix(r"\(").and_then(|t| t.strip_suffix(r"\)")) { (false, inner) }
-    else if let Some(inner) = s.strip_prefix("$$").and_then(|t| t.strip_suffix("$$")) { (true, inner) }
-    else if let Some(inner) = s.strip_prefix('$').and_then(|t| t.strip_suffix('$')) { (false, inner) }
+    let (disp, tex) = if let Some(inner) = s.strip_prefix(r"\[").and_then(|t| t.strip_suffix(r"\]")) {
+        (true, inner)
+    } else if let Some(inner) = s.strip_prefix(r"\(").and_then(|t| t.strip_suffix(r"\)")) {
+        (false, inner)
+    } else if let Some(inner) = s.strip_prefix("$$").and_then(|t| t.strip_suffix("$$")) {
+        (true, inner)
+    } else if let Some(inner) = s.strip_prefix('$').and_then(|t| t.strip_suffix('$')) { (false, inner) }
     else { (DISPLAY_ENV.is_match(s), s) };
     match (dollars, disp) {
-        (true, true) => format!("$${tex}$$"),
-        (true, false) => format!("${tex}$"),
-        (false, true) => format!(r"\[{tex}\]"),
-        (false, false) => format!(r"\({tex}\)"),
+        (true, true) => format!("$${tex}$$"), (true, false) => format!("${tex}$"), (false, true) => format!(r"\[{tex}\]"),
+        (false, false) => format!(r"\({tex}\)")
     }
 }
 
@@ -242,9 +244,18 @@ pub(crate) fn concat_streams(outputs: &[Value]) -> Vec<Value> {
             "stream" => {
                 let text = text_str(&out["text"]);
                 match out["name"].as_str().unwrap_or("") {
-                    "stdout" => { stdout.push_str(&text); has_out = true; }
-                    "stderr" => { stderr.push_str(&text); has_err = true; }
-                    "markdown" => { markdown.push_str(&text); has_md = true; }
+                    "stdout" => {
+                        stdout.push_str(&text);
+                        has_out = true;
+                    }
+                    "stderr" => {
+                        stderr.push_str(&text);
+                        has_err = true;
+                    }
+                    "markdown" => {
+                        markdown.push_str(&text);
+                        has_md = true;
+                    }
                     _ => res.push(out.clone()),
                 }
             }
@@ -267,19 +278,11 @@ pub(crate) fn preferred_msg_out(out: &Value, html1st: bool, include_imgs: bool) 
         "error" => ("text/plain", out["traceback"].as_array().map(|a| a.iter().map(text_str).collect::<Vec<_>>().join("\n")).unwrap_or_default()),
         "execute_result" | "display_data" => {
             let Some(data) = out["data"].as_object() else { return ("text/plain", String::new()); };
-            let mut order: Vec<&'static str> = if html1st {
-                vec!["text/html", "text/markdown", "application/javascript", "text/latex"]
-            } else {
-                vec!["text/markdown", "text/html", "application/javascript", "text/latex"]
-            };
+            let mut order: Vec<&'static str> = if html1st { vec!["text/html", "text/markdown", "application/javascript", "text/latex"] }
+            else { vec!["text/markdown", "text/html", "application/javascript", "text/latex"] };
             if include_imgs { order.extend(["image/jpeg", "image/png", "image/webp", "image/svg+xml"]); }
             order.push("text/plain");
-            for mt in order {
-                if let Some(v) = data.get(mt) {
-                    let s = text_str(v);
-                    if !s.is_empty() { return (mt, s); }
-                }
-            }
+            for mt in order { if let Some(v) = data.get(mt) { let s = text_str(v); if !s.is_empty() { return (mt, s); } } }
             ("text/plain", String::new())
         }
         _ => ("text/plain", format!("Error: Failed to parse unknown output - {out}")),
@@ -289,20 +292,13 @@ pub(crate) fn preferred_msg_out(out: &Value, html1st: bool, include_imgs: bool) 
 /// Plain-text rendering of a Jupyter output list, as `aidialog.dialog.render_outputs_ai`
 #[cfg(feature = "full")]
 pub fn render_outputs_ai(outputs: &[Value], dollars: bool) -> String {
-    concat_streams(outputs)
-        .iter()
-        .map(|o| {
-            let (mime, d) = preferred_msg_out(o, false, false);
-            match mime {
-                "text/plain" => strip_ansi(&d),
-                "text/html" | "text/markdown" => d,
-                "text/latex" => normalize_text_latex(&d, dollars),
-                "application/javascript" => format!("<script>{d}</script>"),
-                _ => String::new(),
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+    concat_streams(outputs).iter().map(|o| {
+        let (mime, d) = preferred_msg_out(o, false, false);
+        match mime {
+            "text/plain" => strip_ansi(&d), "text/html" | "text/markdown" => d, "text/latex" => normalize_text_latex(&d, dollars),
+            "application/javascript" => format!("<script>{d}</script>"), _ => String::new()
+        }
+    }).collect::<Vec<_>>().join("\n")
 }
 
 /// Render notebook outputs as Markdown: text in `output` fences, HTML in `{=html}`, Markdown inlined, images as data URIs
@@ -355,17 +351,11 @@ pub fn render_text(outputs: &[Value], html1st: bool, cap_tb: bool) -> String {
         let typ = out["output_type"].as_str().unwrap_or("");
         let (mime, raw) = if typ == "error" && cap_tb {
             ("text/plain", traceback(out["traceback"].as_array().map(Vec::as_slice).unwrap_or_default(), true))
-        } else {
-            preferred_msg_out(&out, html1st, false)
-        };
+        } else { preferred_msg_out(&out, html1st, false) };
         let d = strip_ansi(&raw);
         if d.is_empty() { continue; }
         let tag = if typ == "stream" { out["name"].as_str().unwrap_or("stream") } else { typ };
-        let attr = if matches!(typ, "execute_result" | "display_data") && mime != "text/plain" {
-            format!(r#" mime="{mime}""#)
-        } else {
-            String::new()
-        };
+        let attr = if matches!(typ, "execute_result" | "display_data") && mime != "text/plain" { format!(r#" mime="{mime}""#) } else { String::new() };
         let body = if d.ends_with('\n') { format!("\n{d}") } else { format!("\n{d}\n") };
         items.push((d, format!("<{tag}{attr}>{body}</{tag}>")));
     }

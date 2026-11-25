@@ -4,6 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
 
 use crate::Caps;
@@ -191,10 +192,32 @@ pub fn turns(entries: Vec<Turn>) -> Vec<Value> {
     input
 }
 
+fn unique_call_id(base: &str, used: &mut HashSet<String>) -> String {
+    let id: String = base.chars().take(64).collect();
+    if used.insert(id.clone()) { return id; }
+    for n in 2.. {
+        let suf = format!("_{n}");
+        let cand = format!("{}{suf}", base.chars().take(64 - suf.len()).collect::<String>());
+        if used.insert(cand.clone()) { return cand; }
+    }
+    unreachable!()
+}
+
 fn model_call_ids(items: &mut [Value]) {
+    let (mut used, mut pending): (HashSet<String>, HashMap<String, VecDeque<String>>) = (HashSet::new(), HashMap::new());
     for item in items {
-        if matches!(item["type"].as_str(), Some("function_call" | "function_call_output")) {
-            if let Some(id) = item["call_id"].as_str() { item["call_id"] = id.chars().take(64).collect::<String>().into(); }
+        let Some(id) = item["call_id"].as_str().map(str::to_owned) else { continue };
+        match item["type"].as_str() {
+            Some("function_call") => {
+                let mapped = unique_call_id(&id, &mut used);
+                pending.entry(id).or_default().push_back(mapped.clone());
+                item["call_id"] = mapped.into();
+            }
+            Some("function_call_output") => {
+                let mapped = pending.get_mut(&id).and_then(VecDeque::pop_front).unwrap_or_else(|| id.chars().take(64).collect());
+                item["call_id"] = mapped.into();
+            }
+            _ => {}
         }
     }
 }

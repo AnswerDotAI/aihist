@@ -73,6 +73,12 @@ def test_reply_streams():
     msgs = fmt2hist(r.finish('*[Response interrupted]*'))
     assert [m.role for m in msgs] == ['assistant', 'tool', 'assistant']
     assert msgs[0].content[0].text == 'Let me check.' and msgs[1].content[0].text == '2' and msgs[2].content[0].text == '*[Response interrupted]*'
+    # Duplicate call IDs in one round pair with their results in FIFO order without overwriting arguments.
+    dup = Reply()
+    dshown = [dup.add(o) for o in (ToolUse(id='d1', name='py', arguments=dict(code='a=1')), ToolUse(id='d1', name='py', arguments=dict(code='b=2')),
+        ToolResult(id='d1', name='py', text='1'), ToolResult(id='d1', name='py', text='2'))]
+    assert [blocks(s)[0]['tool']['args'] for s in dshown[2:]] == [dict(code='a=1'), dict(code='b=2')]
+    assert [(b['tool']['args'], b['tool']['result']) for b in blocks(dup.finish())] == [(dict(code='a=1'), '1'), (dict(code='b=2'), '2')]
 
 def test_reply_limits():
     "Full or marked results bypass history shortening, not the practical 1MiB ceiling; string arguments retain 25k characters"

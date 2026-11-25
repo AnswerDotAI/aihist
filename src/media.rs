@@ -48,8 +48,10 @@ pub fn readable(mime: &str) -> bool { IMG_MIMES.contains(&mime) || mime == "appl
 
 /// Text document MIME types; unknown binary formats are not decoded as text.
 pub fn text_file(mime: &str) -> bool {
-    mime.starts_with("text/") || matches!(mime, "application/json" | "application/toml" | "application/yaml" | "application/x-yaml" | "application/xml" | "application/javascript" | "application/sql")
-        || mime.ends_with("+json") || mime.ends_with("+xml")
+    mime.starts_with("text/") || matches!(
+        mime, "application/json" | "application/toml" | "application/yaml" | "application/x-yaml" | "application/xml" | "application/javascript"
+            | "application/sql"
+    ) || mime.ends_with("+json") || mime.ends_with("+xml")
 }
 
 fn file_mime(reference: &str) -> Option<&str> {

@@ -214,23 +214,17 @@ fn msg2md(nb: &str, language: &str, weave: bool) -> PyResult<Option<String>> {
 /// A notebook JSON as one Markdown document
 #[pyfunction]
 #[pyo3(signature = (nb, language="python", exportfilter=false, weave=false))]
-fn dlg2md(nb: &str, language: &str, exportfilter: bool, weave: bool) -> PyResult<String> {
-    Ok(export::dlg2md_nb(&de(nb)?, language, exportfilter, weave))
-}
+fn dlg2md(nb: &str, language: &str, exportfilter: bool, weave: bool) -> PyResult<String> { Ok(export::dlg2md_nb(&de(nb)?, language, exportfilter, weave)) }
 
 /// Input source or plain-text output for one cell JSON
 #[pyfunction]
 #[pyo3(signature = (cell, part="input"))]
-fn msg2text(cell: &str, part: &str) -> PyResult<String> {
-    export::msg2text(&de(cell)?, part).map_err(PyValueError::new_err)
-}
+fn msg2text(cell: &str, part: &str) -> PyResult<String> { export::msg2text(&de(cell)?, part).map_err(PyValueError::new_err) }
 
 /// Marked exported Python code, or a full commented Python transcript when `full`
 #[pyfunction]
 #[pyo3(signature = (cells, full=false))]
-fn msgs2py(cells: &str, full: bool) -> PyResult<String> {
-    Ok(export::msgs2py(&de::<Vec<Value>>(cells)?, full))
-}
+fn msgs2py(cells: &str, full: bool) -> PyResult<String> { Ok(export::msgs2py(&de::<Vec<Value>>(cells)?, full)) }
 
 /// A turn's reply as it streams in
 #[pyclass]

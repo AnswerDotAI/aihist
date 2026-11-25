@@ -3,9 +3,9 @@
 //! `parse` reads a stored reply into blocks, `items` turns blocks into Responses input items for the model, and `write` writes a turn as a stored reply.
 
 use regex::Regex;
-use std::sync::LazyLock;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
+use std::sync::LazyLock;
 
 /// Fence info string of a tool block
 pub const TOOL_INFO: &str = "json {.tool}";
@@ -272,9 +272,9 @@ impl Reply {
 
     /// Add a client call's result, returning its completed block for the stream
     pub fn result(&mut self, r: Call) -> String {
-        let block = self.parts.iter().rev().find_map(|p| match p {
-            Part::ToolUse(c) if c.id == r.id && !c.server => Some(write(&[p.clone(), Part::ToolResult(r.clone())], None)), _ => None
-        }).unwrap_or_default();
+        let seen = self.parts.iter().filter(|p| matches!(p, Part::ToolResult(x) if x.id == r.id)).count();
+        let block = self.parts.iter().filter(|p| matches!(p, Part::ToolUse(c) if c.id == r.id && !c.server)).nth(seen)
+            .map(|p| write(&[p.clone(), Part::ToolResult(r.clone())], None)).unwrap_or_default();
         self.parts.push(Part::ToolResult(r));
         if block.is_empty() { block } else { format!("\n\n{block}\n") }
     }
@@ -298,7 +298,7 @@ pub fn write(parts: &[Part], usage: Option<&Usage>) -> String {
             Part::ToolUse(c) if c.server => {
                 out.push(tool_block(c, &c.arguments, c.text.as_deref().filter(|t| !t.is_empty()).unwrap_or("Server tool call executed.")))
             }
-            Part::ToolUse(c) => match open.iter().position(|o| o.id == c.id) { Some(i) => open[i] = c, None => open.push(c) },
+            Part::ToolUse(c) => open.push(c),
             Part::ToolResult(r) => {
                 let args = open.iter().position(|o| o.id == r.id).map(|i| &open.remove(i).arguments);
                 if r.id.is_some() { out.push(tool_block(r, args.unwrap_or(&Map::new()), r.text.as_deref().unwrap_or_default())) }
@@ -417,9 +417,7 @@ pub fn tool_md(d: &Value) -> String {
     let params = args.map(|m| m.iter().map(|(k, v)| format!("{k}={}", fmt_param(v))).collect::<Vec<_>>().join(", ")).unwrap_or_default();
     let res = d.get("result");
     let tail = match res {
-        None | Some(Value::Null) => String::new(),
-        Some(Value::String(s)) if s.is_empty() => String::new(),
-        Some(v) => format!("→{}", fmt_param(v)),
+        None | Some(Value::Null) => String::new(), Some(Value::String(s)) if s.is_empty() => String::new(), Some(v) => format!("→{}", fmt_param(v))
     };
     let name = d.get("name").and_then(Value::as_str).unwrap_or("None");
     let label = code_span(&format!("{name}({params}){tail}"));
@@ -450,19 +448,12 @@ pub fn usage_md(d: &Value) -> String {
         else { format!("{} tokens", fmt_int_commas(d.get("total_tokens").and_then(Value::as_i64).unwrap_or(0))) }
     });
     let det = d.get("detail").and_then(Value::as_str).filter(|s| !s.is_empty()).map(str::to_owned).unwrap_or_else(|| {
-        d.as_object()
-            .map(|m| {
-                m.iter()
-                    .filter(|(k, v)| *k != "model" && crate::cells::truthy(v))
-                    .map(|(k, v)| match v {
-                        Value::Number(n) if n.is_i64() => format!("{k}={}", fmt_int_commas(n.as_i64().unwrap())),
-                        Value::String(s) => format!("{k}={s}"),
-                        other => format!("{k}={other}"),
-                    })
-                    .collect::<Vec<_>>()
-                    .join(" | ")
-            })
-            .unwrap_or_default()
+        d.as_object().map(|m| {
+            m.iter().filter(|(k, v)| *k != "model" && crate::cells::truthy(v)).map(|(k, v)| match v {
+                Value::Number(n) if n.is_i64() => format!("{k}={}", fmt_int_commas(n.as_i64().unwrap())), Value::String(s) => format!("{k}={s}"),
+                other => format!("{k}={other}")
+            }).collect::<Vec<_>>().join(" | ")
+        }).unwrap_or_default()
     });
     fenced_ch(&format!("## {summ}\n\n{}", code_span(&det)), " {.details .token-usage-details}", ':')
 }

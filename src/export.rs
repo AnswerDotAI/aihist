@@ -10,11 +10,9 @@ use crate::output::{render_md, render_outputs_ai, render_text};
 use crate::reply::{TOOL_INFO, USAGE_INFO, fenced_ch, fmt_tools, strip_blocks};
 
 /// Characters encoded by Python's `urllib.parse.quote(s)` (default `safe='/'`)
-const QUOTE_SET: &AsciiSet = &CONTROLS
-    .add(b' ').add(b'!').add(b'"').add(b'#').add(b'$').add(b'%').add(b'&').add(b'\'')
-    .add(b'(').add(b')').add(b'*').add(b'+').add(b',').add(b':').add(b';').add(b'<')
-    .add(b'=').add(b'>').add(b'?').add(b'@').add(b'[').add(b'\\').add(b']').add(b'^')
-    .add(b'`').add(b'{').add(b'|').add(b'}');
+const QUOTE_SET: &AsciiSet = &CONTROLS.add(b' ').add(b'!').add(b'"').add(b'#').add(b'$').add(b'%').add(b'&').add(b'\'').add(b'(').add(b')').add(b'*').add(b'+')
+    .add(b',').add(b':').add(b';').add(b'<').add(b'=').add(b'>').add(b'?').add(b'@').add(b'[').add(b'\\').add(b']').add(b'^').add(b'`').add(b'{').add(b'|')
+    .add(b'}');
 
 static DIRECTIVE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?m)^\s*#\|\s*exports?\b").expect("valid regex"));
 
@@ -50,17 +48,12 @@ pub fn msg2md_in(nb: Option<&Value>, cell: &Value, language: &str, weave: bool) 
         "raw" => Some(fenced_ch(&m.content, "", '`')),
         "prompt" => {
             let mut parts = vec![fenced_ch(&inline_atts(nb, cell, m.content), " prompt", ':')];
-            if !m.out.trim().is_empty() {
-                parts.push(fenced_ch(&inline_atts(nb, cell, fmt_tools(&m.out)), " reply", ':'));
-            }
+            if !m.out.trim().is_empty() { parts.push(fenced_ch(&inline_atts(nb, cell, fmt_tools(&m.out)), " reply", ':')); }
             Some(parts.join("\n\n"))
         }
         _ => {
             let outs = cell["outputs"].as_array().map(Vec::as_slice).unwrap_or_default();
-            if weave {
-                let text = render_text(outs, false, false);
-                return (!text.is_empty()).then_some(text);
-            }
+            if weave { let text = render_text(outs, false, false); return (!text.is_empty()).then_some(text); }
             let mut parts = Vec::new();
             if !m.content.trim().is_empty() { parts.push(fenced_ch(&m.content, language, '`')); }
             let rendered = render_md(outs, true);
@@ -82,23 +75,13 @@ fn filter_exported(cells: &[Value]) -> Vec<&Value> {
 pub fn dlg2md_nb(nb: &Value, language: &str, exportfilter: bool, weave: bool) -> String {
     let cells = nb["cells"].as_array().map(Vec::as_slice).unwrap_or_default();
     let selected: Vec<&Value> = if exportfilter { filter_exported(cells) } else { cells.iter().collect() };
-    let joined = selected
-        .into_iter()
-        .filter_map(|c| msg2md_in(Some(nb), c, language, weave))
-        .filter(|s| !s.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n\n");
+    let joined = selected.into_iter().filter_map(|c| msg2md_in(Some(nb), c, language, weave)).filter(|s| !s.is_empty()).collect::<Vec<_>>().join("\n\n");
     format!("{joined}\n")
 }
 
 /// Cells as one Markdown document with `language` code fences and stored attachments inlined
 pub fn dlg2md(cells: &[Value], language: &str) -> String {
-    let joined = cells
-        .iter()
-        .filter_map(|c| msg2md(c, language))
-        .filter(|s| !s.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n\n");
+    let joined = cells.iter().filter_map(|c| msg2md(c, language)).filter(|s| !s.is_empty()).collect::<Vec<_>>().join("\n\n");
     format!("{joined}\n")
 }
 
@@ -124,12 +107,7 @@ fn comment_lines(text: &str, prefix: &str) -> String {
 /// Marked exported Python code, or when `full`, every cell with non-code and outputs commented
 pub fn msgs2py(cells: &[Value], full: bool) -> String {
     if !full {
-        return cells
-            .iter()
-            .filter(|c| kind(c) == "code" && is_exported(c))
-            .map(cells::content)
-            .collect::<Vec<_>>()
-            .join("\n\n");
+        return cells.iter().filter(|c| kind(c) == "code" && is_exported(c)).map(cells::content).collect::<Vec<_>>().join("\n\n");
     }
     let mut parts = Vec::new();
     for cell in cells {

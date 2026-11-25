@@ -1,10 +1,15 @@
-#[cfg(feature = "full")] use std::io::Write;
-#[cfg(feature = "full")] use base64::{Engine, engine::general_purpose::STANDARD};
-#[cfg(feature = "full")] use serde_json::{Map, Value, json};
+#[cfg(feature = "full")]
+use base64::{Engine, engine::general_purpose::STANDARD};
+#[cfg(feature = "full")]
+use serde_json::{Map, Value, json};
+#[cfg(feature = "full")]
+use std::io::Write;
 
 use aihist::output::keep_ends;
-#[cfg(feature = "full")] use aihist::tokens::{IMG_TOKENS, PDF_PAGE_TOKENS, bundle, cell, count, pdf_pages};
-#[cfg(feature = "full")] use aihist::{dlg2md_nb, msg2md_in, msg2text, msgs2py};
+#[cfg(feature = "full")]
+use aihist::tokens::{IMG_TOKENS, PDF_PAGE_TOKENS, bundle, cell, count, pdf_pages};
+#[cfg(feature = "full")]
+use aihist::{dlg2md_nb, msg2md_in, msg2text, msgs2py};
 
 #[test]
 fn keep_ends_cuts_the_middle_at_char_boundaries() {
@@ -58,13 +63,11 @@ fn markdown_text_and_python_exports() {
                 "id": "n1", "cell_type": "markdown", "metadata": {},
                 "source": "# Results ![p](attachment:a.png)",
                 "attachments": {"a.png": {"image/png": "AAAA"}}
-            },
-            {
+            }, {
                 "id": "c1", "cell_type": "code", "metadata": {"nbdev": {"export": "true"}},
                 "source": "x = 1",
                 "outputs": [{"output_type": "stream", "name": "stdout", "text": "ok\n"}]
-            },
-            {
+            }, {
                 "id": "p1", "cell_type": "code", "metadata": {"solveit_ai": true, "pinned": true},
                 "source": "%%prompt\nCheck",
                 "outputs": [{"output_type": "display_data", "metadata": {}, "data": {"text/markdown": reply}}]

@@ -57,6 +57,14 @@ def test_chats_and_dialogs():
     assert next(i['call_id'] for i in items if i['type']=='function_call') == tid and items[-1]['content'][0]['text']=='Done.'
     target = d.mk_message('Continue.', msg_type='prompt')
     assert next(i['call_id'] for i in build(d, target.id) if i['type']=='function_call') == tid[:64]
+    # Duplicate and truncation-colliding call IDs are deduplicated in FIFO order within 64 chars in model input.
+    dup = Dialog(name='dup')
+    dup.mk_message('Run.', msg_type='prompt', output=f"{tool('c1', 'a', '1')}\n\n{tool('c1', 'b', '2')}\n\n{tool(tid+'a', 'c', '3')}\n\n{tool(tid+'b', 'd', '4')}")
+    dtgt = dup.mk_message('Next.', msg_type='prompt')
+    built = build(dup, dtgt.id)
+    fcs = [i['call_id'] for i in built if i['type']=='function_call']
+    fcos = [i['call_id'] for i in built if i['type']=='function_call_output']
+    assert fcs == fcos and len(set(fcs)) == 4 and all(len(x) <= 64 for x in fcs)
     # `reply2dlg` turns one reply into notes and code that call the tools, which `dlg2reply` turns back into the reply.
     pm = Message('What is 1+1?', msg_type='prompt', output=hist2fmt([Msg('assistant', [Text('Check:'), ToolUse(id='x1', name='python', arguments=dict(code='1+1'))]),
         Msg('tool', [ToolResult(id='x1', name='python', text='2')]), Msg('assistant', [Text('It is 2.')])], mx=None))
