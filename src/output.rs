@@ -1,7 +1,8 @@
 //! Kernel outputs as a model reads them: a code cell's outputs, and the result of a tool call that runs code.
 
 use serde_json::{Map, Value};
-#[cfg(feature = "full")] use {crate::{Caps, media}, regex::Regex, serde_json::json, std::sync::LazyLock};
+#[cfg(feature = "full")] use crate::{Caps, media};
+#[cfg(feature = "text")] use {regex::Regex, serde_json::json, std::sync::LazyLock};
 
 /// Text mimes in reading preference order; the first one present is the one counted
 pub const TEXT_MIMES: [&str; 5] = ["text/markdown", "text/html", "application/javascript", "text/latex", "text/plain"];
@@ -210,11 +211,11 @@ pub fn tool_result<'a>(outs: impl Iterator<Item = (&'a str, &'a Value)>, caps: &
     merge(text, parts, full, md)
 }
 
-#[cfg(feature = "full")]
+#[cfg(feature = "text")]
 static DISPLAY_ENV: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\\begin\{(align|equation|gather|multline|eqnarray)").expect("valid regex"));
 
 /// Canonicalize a `text/latex` payload to `\(...\)`/`\[...\]` delimiters, or `$...$`/`$$...$$` when `dollars`
-#[cfg(feature = "full")]
+#[cfg(feature = "text")]
 pub fn normalize_text_latex(s: &str, dollars: bool) -> String {
     if s.is_empty() { return String::new(); }
     let (disp, tex) = if let Some(inner) = s.strip_prefix(r"\[").and_then(|t| t.strip_suffix(r"\]")) {
@@ -232,7 +233,7 @@ pub fn normalize_text_latex(s: &str, dollars: bool) -> String {
 }
 
 /// Concatenate stdout, stderr and markdown streams, keeping `error` and `execute_result` outputs at the end
-#[cfg(feature = "full")]
+#[cfg(feature = "text")]
 pub(crate) fn concat_streams(outputs: &[Value]) -> Vec<Value> {
     let (mut stdout, mut stderr, mut markdown) = (String::new(), String::new(), String::new());
     let (mut has_out, mut has_err, mut has_md) = (false, false, false);
@@ -269,7 +270,7 @@ pub(crate) fn concat_streams(outputs: &[Value]) -> Vec<Value> {
 }
 
 /// Preferred MIME type and content for a Jupyter output dict
-#[cfg(feature = "full")]
+#[cfg(feature = "text")]
 pub(crate) fn preferred_msg_out(out: &Value, html1st: bool, include_imgs: bool) -> (&'static str, String) {
     match out["output_type"].as_str().unwrap_or("") {
         "stream" => ("text/plain", text_str(&out["text"])),
@@ -288,7 +289,7 @@ pub(crate) fn preferred_msg_out(out: &Value, html1st: bool, include_imgs: bool) 
 }
 
 /// Plain-text rendering of a Jupyter output list, as `aidialog.dialog.render_outputs_ai`
-#[cfg(feature = "full")]
+#[cfg(feature = "text")]
 pub fn render_outputs_ai(outputs: &[Value], dollars: bool) -> String {
     concat_streams(outputs).iter().map(|o| {
         let (mime, d) = preferred_msg_out(o, false, false);
@@ -300,7 +301,7 @@ pub fn render_outputs_ai(outputs: &[Value], dollars: bool) -> String {
 }
 
 /// Render notebook outputs as Markdown: text in `output` fences, HTML in `{=html}`, Markdown inlined, images as data URIs
-#[cfg(feature = "full")]
+#[cfg(feature = "text")]
 pub fn render_md(outputs: &[Value], html1st: bool) -> String {
     let (mut parts, mut buf) = (Vec::new(), String::new());
     let flush = |buf: &mut String, parts: &mut Vec<String>| {
@@ -342,7 +343,7 @@ pub fn render_md(outputs: &[Value], html1st: bool) -> String {
 }
 
 /// Concise ANSI-stripped text for outputs, wrapped in XML-ish tags when multiple outputs appear
-#[cfg(feature = "full")]
+#[cfg(feature = "text")]
 pub fn render_text(outputs: &[Value], html1st: bool, cap_tb: bool) -> String {
     let mut items: Vec<(String, String)> = Vec::new();
     for out in concat_streams(outputs) {
