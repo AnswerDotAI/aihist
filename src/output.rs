@@ -1,8 +1,7 @@
 //! Kernel outputs as a model reads them: a code cell's outputs, and the result of a tool call that runs code.
 
 use serde_json::{Map, Value};
-#[cfg(feature = "full")]
-use {crate::{Caps, media}, regex::Regex, serde_json::json, std::sync::LazyLock};
+#[cfg(feature = "full")] use {crate::{Caps, media}, regex::Regex, serde_json::json, std::sync::LazyLock};
 
 /// Text mimes in reading preference order; the first one present is the one counted
 pub const TEXT_MIMES: [&str; 5] = ["text/markdown", "text/html", "application/javascript", "text/latex", "text/plain"];
@@ -164,8 +163,7 @@ fn clean_cli(s: &str) -> String {
 
 /// The MIME type a `ToolResponse` displays as: its content as a list of Responses content parts, which a tool result
 /// passes to the model unchanged
-#[cfg(feature = "full")]
-pub const TOOL_RESPONSE_MIME: &str = "application/vnd.aidialog.tool-response+json";
+#[cfg(feature = "full")] pub const TOOL_RESPONSE_MIME: &str = "application/vnd.aidialog.tool-response+json";
 
 /// A tool call's result
 #[cfg(feature = "full")]

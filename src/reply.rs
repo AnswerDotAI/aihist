@@ -210,8 +210,7 @@ pub struct Usage {
     pub web_search_requests: u64,
     pub cost: f64,
     /// The user's balance after the latest response, which the stored block leaves out
-    #[serde(skip)]
-    pub balance: Option<f64>,
+    #[serde(skip)] pub balance: Option<f64>,
 }
 
 impl std::ops::AddAssign for Usage {

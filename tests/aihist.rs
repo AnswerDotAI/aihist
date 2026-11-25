@@ -1,15 +1,10 @@
-#[cfg(feature = "full")]
-use base64::{Engine, engine::general_purpose::STANDARD};
-#[cfg(feature = "full")]
-use serde_json::{Map, Value, json};
-#[cfg(feature = "full")]
-use std::io::Write;
+#[cfg(feature = "full")] use base64::{Engine, engine::general_purpose::STANDARD};
+#[cfg(feature = "full")] use serde_json::{Map, Value, json};
+#[cfg(feature = "full")] use std::io::Write;
 
 use aihist::output::keep_ends;
-#[cfg(feature = "full")]
-use aihist::tokens::{IMG_TOKENS, PDF_PAGE_TOKENS, bundle, cell, count, pdf_pages};
-#[cfg(feature = "full")]
-use aihist::{dlg2md_nb, msg2md_in, msg2text, msgs2py};
+#[cfg(feature = "full")] use aihist::tokens::{IMG_TOKENS, PDF_PAGE_TOKENS, bundle, cell, count, pdf_pages};
+#[cfg(feature = "full")] use aihist::{dlg2md_nb, msg2md_in, msg2text, msgs2py};
 
 #[test]
 fn keep_ends_cuts_the_middle_at_char_boundaries() {
