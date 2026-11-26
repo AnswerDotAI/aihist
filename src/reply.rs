@@ -457,6 +457,28 @@ pub fn usage_md(d: &Value) -> String {
     fenced_ch(&format!("## {summ}\n\n{}", code_span(&det)), " {.details .token-usage-details}", ':')
 }
 
+/// One piece of a saved reply: Markdown prose, a parsed `{.tool}` block, or a parsed `{.usage}` block.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ReplyPart { Md(String), Tool(Value), Usage(Value) }
+
+/// Split a saved reply into alternating `Md`, `Tool`, and `Usage` parts; invalid JSON fences remain inside prose.
+pub fn reply_parts(s: &str) -> Vec<ReplyPart> {
+    let (mut parts, mut pos) = (Vec::new(), 0);
+    let push_md = |parts: &mut Vec<ReplyPart>, chunk: &str| {
+        let t = chunk.trim_matches(['\r', '\n']);
+        if !t.trim().is_empty() { parts.push(ReplyPart::Md(t.to_owned())); }
+    };
+    for (info, body, start, end) in fenced_blocks(s) {
+        if info != TOOL_INFO && info != USAGE_INFO { continue; }
+        let Ok(data) = serde_json::from_str::<Value>(body) else { continue; };
+        push_md(&mut parts, &s[pos..start]);
+        parts.push(if info == TOOL_INFO { ReplyPart::Tool(data) } else { ReplyPart::Usage(data) });
+        pos = end;
+    }
+    push_md(&mut parts, &s[pos..]);
+    parts
+}
+
 /// Rewrite fenced JSON tool and usage blocks in `s` into folded `::: details` display Markdown
 pub fn fmt_tools(s: &str) -> String {
     let (mut out, mut pos) = (String::with_capacity(s.len()), 0);

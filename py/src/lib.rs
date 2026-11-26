@@ -211,6 +211,11 @@ fn msg2md(nb: &str, language: &str, weave: bool) -> PyResult<Option<String>> {
     Ok(export::msg2md_in(Some(&nb), cell, language, weave))
 }
 
+/// Project a notebook JSON into `{frontmatter, language, cells}` structured typed parts
+#[pyfunction]
+#[pyo3(signature = (nb, opts="{}"))]
+fn export_nb(nb: &str, opts: &str) -> PyResult<String> { Ok(ser(export::export_nb(&de(nb)?, &de(opts)?))) }
+
 /// A notebook JSON as one Markdown document
 #[pyfunction]
 #[pyo3(signature = (nb, language="python", exportfilter=false, weave=false))]
@@ -292,6 +297,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(usage_md, m)?)?;
     m.add_function(wrap_pyfunction!(fmt_tools, m)?)?;
     m.add_function(wrap_pyfunction!(msg2md, m)?)?;
+    m.add_function(wrap_pyfunction!(export_nb, m)?)?;
     m.add_function(wrap_pyfunction!(dlg2md, m)?)?;
     m.add_function(wrap_pyfunction!(msg2text, m)?)?;
     m.add_function(wrap_pyfunction!(msgs2py, m)?)?;

@@ -4,7 +4,7 @@
 
 use aihist::output::keep_ends;
 #[cfg(feature = "full")] use aihist::tokens::{IMG_TOKENS, PDF_PAGE_TOKENS, bundle, cell, count, pdf_pages};
-#[cfg(feature = "full")] use aihist::{dlg2md_nb, msg2md_in, msg2text, msgs2py};
+#[cfg(feature = "full")] use aihist::{ExportAttachment, ExportOpts, ExportPart, dlg2md_nb, export_nb, msg2md_in, msg2text, msgs2py};
 
 #[test]
 fn keep_ends_cuts_the_middle_at_char_boundaries() {
@@ -84,4 +84,53 @@ fn markdown_text_and_python_exports() {
     assert_eq!(msgs2py(cells, false), "x = 1");
     let full = msgs2py(cells, true);
     assert!(full.contains("# --- Cell: p1 (prompt) ---") && full.contains("#> ok") && full.contains("# --- Assistant Response ---"));
+
+    // Structured cell export returns typed parts, attachment maps, cell metadata, and multi-MIME fallbacks.
+    let mut with_fm = nb.clone();
+    with_fm["metadata"]["kernelspec"] = json!({"language": "julia"});
+    with_fm["cells"].as_array_mut().unwrap().insert(0, json!({"id": "fm", "cell_type": "raw", "metadata": {}, "source": "---\ntitle: Demo\n---"}));
+    with_fm["cells"].as_array_mut().unwrap().push(json!({
+        "id": "c2", "cell_type": "code", "metadata": {}, "source": "show()",
+        "outputs": [
+            {"output_type": "display_data", "metadata": {}, "data": {"text/html": "<b>hi</b>", "text/plain": "\x1b[1mhi\x1b[0m"}},
+            {"output_type": "display_data", "metadata": {}, "data": {"image/png": "CC\nCC", "text/plain": "<Fig>"}}
+        ]
+    }));
+    with_fm["cells"].as_array_mut().unwrap().push(json!({"id": "sk", "cell_type": "markdown", "metadata": {"skipped": true}, "source": "hidden"}));
+
+    let exp = export_nb(&with_fm, &ExportOpts::default());
+    assert_eq!((exp.frontmatter.as_str(), exp.language.as_str()), ("---\ntitle: Demo\n---\n", "julia"));
+    assert_eq!(exp.cells.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), vec!["n1", "c1", "p1", "c2", "sk"]);
+    assert_eq!(exp.cells[0].attachments.get("a.png"), Some(&ExportAttachment { mime: "image/png".into(), data: Some("AAAA".into()) }));
+    assert_eq!(exp.cells[1].src, vec![ExportPart::Code { lang: "julia".into(), text: "x = 1".into() }]);
+    assert_eq!(exp.cells[1].out, vec![ExportPart::Text { text: "ok".into() }]);
+    assert_eq!(exp.cells[1].meta.get("nbdev"), Some(&json!({"export": "true"})));
+    assert!(matches!(exp.cells[2].out.as_slice(), [ExportPart::Md { .. }, ExportPart::Tool { .. }, ExportPart::Md { .. }]));
+    assert_eq!(
+        exp.cells[3].out, vec![
+            ExportPart::Html { html: "<b>hi</b>".into(), text: Some("hi".into()) },
+            ExportPart::Image { mime: "image/png".into(), data: "CCCC".into(), text: Some("<Fig>".into()) },
+        ]
+    );
+    assert_eq!(exp.cells[4].meta.get("skipped"), Some(&json!(true)));
+
+    let filt = export_nb(&with_fm, &ExportOpts { exportfilter: true, ..Default::default() });
+    assert_eq!((filt.frontmatter.as_str(), filt.cells.len(), filt.cells[0].id.as_str()), ("---\ntitle: Demo\n---\n", 1, "c1"));
+    let no_fm = export_nb(&with_fm, &ExportOpts { frontmatter: false, ..Default::default() });
+    assert!(no_fm.frontmatter.is_empty() && no_fm.cells[0].src == vec![ExportPart::Code { lang: String::new(), text: "---\ntitle: Demo\n---".into() }]);
+    // Interleaved streams and rich displays keep their exact notebook order, merging only consecutive stream runs.
+    let inter = json!({"cells": [{"id": "i", "cell_type": "code", "metadata": {}, "source": "run()", "outputs": [
+        {"output_type": "stream", "name": "stdout", "text": "## Results\n"}, {"output_type": "stream", "name": "stdout", "text": "Two rows.\n"},
+        {"output_type": "display_data", "metadata": {}, "data": {"text/markdown": "| a | b |\n|---|---|\n| 1 | 2 |"}},
+        {"output_type": "stream", "name": "stdout", "text": "*Table 1*\n"}
+    ]}]});
+    assert_eq!(
+        export_nb(&inter, &ExportOpts::default()).cells[0].out, vec![
+            ExportPart::Text { text: "## Results\nTwo rows.".into() }, ExportPart::Md { text: "| a | b |\n|---|---|\n| 1 | 2 |".into() },
+            ExportPart::Text { text: "*Table 1*".into() },
+        ]
+    );
+    // Longest-first attachment inlining avoids prefix collisions (`a.png` vs `a.png2`).
+    let pfx_nb = json!({"cells": [{"id": "p", "cell_type": "markdown", "metadata": {}, "source": "![1](attachment:a.png) ![2](attachment:a.png2)", "attachments": {"a.png": {"image/png": "AAA"}, "a.png2": {"image/png": "BBB"}}}]});
+    assert_eq!(dlg2md_nb(&pfx_nb, "", false, false), "![1](data:image/png;base64,AAA) ![2](data:image/png;base64,BBB)\n");
 }
