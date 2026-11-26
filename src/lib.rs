@@ -17,8 +17,12 @@ pub mod paths;
 #[cfg(feature = "full")] pub mod reply;
 #[cfg(feature = "full")] pub mod tokens;
 
-#[cfg(feature = "full")] pub use export::{dlg2md, dlg2md_nb, msg2md, msg2md_in, msg2text, msgs2py};
-#[cfg(feature = "full")] pub use reply::{fmt_tools, tool_md, usage_md};
+#[cfg(feature = "full")]
+pub use export::{
+    ExportAttachment, ExportCell, ExportDoc, ExportOpts, ExportPart, dlg2md, dlg2md_nb, export_cell, export_nb, msg2md, msg2md_in, msg2text, msgs2py,
+};
+#[cfg(feature = "full")] pub use output::{OutputPart, output_parts};
+#[cfg(feature = "full")] pub use reply::{ReplyPart, fmt_tools, reply_parts, tool_md, usage_md};
 
 /// What a model can read, as a model catalog entry or fastllm's `get_model_info` gives it
 #[cfg(feature = "full")]

@@ -14,7 +14,7 @@ ship-rs-build
 The root package is a pure Rust crate, published to crates.io. Rust users who depend on it never build PyO3. `default = ["full"]` enables all modules; `default-features = false` exposes `output` (core `render`/`strip_ansi`/`keep_ends`/MIME helpers) and `paths` (`realpath`) with only `serde_json`. Its modules are:
 
 - `cells`: one notebook cell as a dialog message, and as a model reads it
-- `export`: Markdown documents (`msg2md`, `dlg2md`), plain-text message parts (`msg2text`), and Python scripts (`msgs2py`)
+- `export`: structured typed cell projection (`export_nb`, `export_cell`), Markdown documents (`msg2md`, `dlg2md`), plain-text message parts (`msg2text`), and Python scripts (`msgs2py`)
 - `input`: a prompt's model input, with the examples, CRAFTs, `$` values and warnings that a host supplies
 - `output`: code outputs and tool results as a model reads them
 - `media`: linked-media loading, MIME detection, resizing images, and media tags

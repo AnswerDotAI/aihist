@@ -299,16 +299,54 @@ pub fn render_outputs_ai(outputs: &[Value], dollars: bool) -> String {
     }).collect::<Vec<_>>().join("\n")
 }
 
-/// Render notebook outputs as Markdown: text in `output` fences, HTML in `{=html}`, Markdown inlined, images as data URIs
+/// One structured display part of a code cell's outputs.
 #[cfg(feature = "full")]
-pub fn render_md(outputs: &[Value], html1st: bool) -> String {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OutputPart { Text(String), Md(String), Html { html: String, text: Option<String> }, Image { mime: String, data: String, text: Option<String> } }
+
+#[cfg(feature = "full")]
+fn plain_fallback(out: &Value) -> Option<String> {
+    let s = strip_ansi(&text_str(out["data"].as_object()?.get("text/plain")?));
+    let trimmed = s.trim_end();
+    (!trimmed.is_empty()).then(|| trimmed.to_owned())
+}
+
+#[cfg(feature = "full")]
+fn merge_streams(outputs: &[Value]) -> Vec<Value> {
+    let (mut res, mut cur): (Vec<Value>, Option<(&str, String)>) = (Vec::new(), None);
+    let flush = |cur: &mut Option<(&str, String)>, res: &mut Vec<Value>| {
+        let Some((name, text)) = cur.take() else { return; };
+        if name == "markdown" { res.push(json!({"output_type": "display_data", "data": {"text/markdown": text}, "metadata": {}})); }
+        else { res.push(json!({"output_type": "stream", "name": name, "text": clean_cli(&text)})); }
+    };
+    for out in outputs {
+        let stream =
+            (out["output_type"].as_str() == Some("stream")).then(|| out["name"].as_str().filter(|&n| matches!(n, "stdout" | "stderr" | "markdown"))).flatten();
+        if let Some(name) = stream {
+            let text = text_str(&out["text"]);
+            if let Some((prev, buf)) = &mut cur && *prev == name { buf.push_str(&text); } else {
+                flush(&mut cur, &mut res);
+                cur = Some((name, text));
+            }
+        } else {
+            flush(&mut cur, &mut res);
+            res.push(out.clone());
+        }
+    }
+    flush(&mut cur, &mut res);
+    res
+}
+
+/// Project notebook outputs into typed display parts, preserving output order and merging adjacent plain-text streams.
+#[cfg(feature = "full")]
+pub fn output_parts(outputs: &[Value], html1st: bool) -> Vec<OutputPart> {
     let (mut parts, mut buf) = (Vec::new(), String::new());
-    let flush = |buf: &mut String, parts: &mut Vec<String>| {
+    let flush = |buf: &mut String, parts: &mut Vec<OutputPart>| {
         let trimmed = buf.trim_end();
-        if !trimmed.is_empty() { parts.push(crate::reply::fenced_ch(trimmed, "output", '`')); }
+        if !trimmed.is_empty() { parts.push(OutputPart::Text(trimmed.to_owned())); }
         buf.clear();
     };
-    for o in concat_streams(outputs) {
+    for o in merge_streams(outputs) {
         let (mime, d) = preferred_msg_out(&o, html1st, true);
         if d.is_empty() { continue; }
         match mime {
@@ -319,26 +357,36 @@ pub fn render_md(outputs: &[Value], html1st: bool) -> String {
             }
             "text/html" | "image/svg+xml" => {
                 flush(&mut buf, &mut parts);
-                parts.push(crate::reply::fenced_ch(d.trim(), "{=html}", '`'));
+                parts.push(OutputPart::Html { html: d.trim().to_owned(), text: plain_fallback(&o) });
             }
             "application/javascript" => {
                 flush(&mut buf, &mut parts);
-                parts.push(crate::reply::fenced_ch(&format!("<script>{d}</script>"), "{=html}", '`'));
+                parts.push(OutputPart::Html { html: format!("<script>{d}</script>"), text: plain_fallback(&o) });
             }
             "text/markdown" | "text/latex" => {
                 flush(&mut buf, &mut parts);
-                parts.push(d.trim().to_owned());
+                parts.push(OutputPart::Md(d.trim().to_owned()));
             }
             "image/jpeg" | "image/png" | "image/webp" => {
                 flush(&mut buf, &mut parts);
-                let b64: String = d.split_whitespace().collect();
-                parts.push(format!("![](data:{mime};base64,{b64})"));
+                let data: String = d.split_whitespace().collect();
+                parts.push(OutputPart::Image { mime: mime.to_owned(), data, text: plain_fallback(&o) });
             }
             _ => {}
         }
     }
     flush(&mut buf, &mut parts);
-    parts.join("\n\n")
+    parts
+}
+
+/// Render notebook outputs as Markdown: text in `output` fences, HTML in `{=html}`, Markdown inlined, images as data URIs
+#[cfg(feature = "full")]
+pub fn render_md(outputs: &[Value], html1st: bool) -> String {
+    output_parts(outputs, html1st).into_iter().map(|p| match p {
+        OutputPart::Text(t) => crate::reply::fenced_ch(&t, "output", '`'), OutputPart::Md(t) => t,
+        OutputPart::Html { html, .. } => crate::reply::fenced_ch(&html, "{=html}", '`'),
+        OutputPart::Image { mime, data, .. } => format!("![](data:{mime};base64,{data})")
+    }).collect::<Vec<_>>().join("\n\n")
 }
 
 /// Concise ANSI-stripped text for outputs, wrapped in XML-ish tags when multiple outputs appear

@@ -11,7 +11,7 @@ from .reply import fmt2hist, write_reply
 __all__ = ['UNSUPPORTED_MSG', 'im_max', 'IMG_TOKS', 'jwrap', 'media_item', 'resize_img', 'prep_img', 'pdf_pages', 'count_tokens',
     'output_parts', 'merge_media', 'tool_result', 'get_refs', 'get_exprs', 'is_nameerr', 'vars_tag', 'vars_hist', 'task_tags', 'warning_tag',
     'cell_turn', 'cell_media', 'cell_reply', 'is_shown', 'references', 'hist_xml', 'to_media', 'to_parts', 'tool_call', 'build', 'dlg2hist', 'reply2chat', 'dlg2chat', 'chat2dlg', 'reply2dlg',
-    'dlg2reply', 'msg2md', 'dlg2md', 'msg2text', 'msgs2py']
+    'dlg2reply', 'export_dlg', 'msg2md', 'dlg2md', 'msg2text', 'msgs2py']
 
 UNSUPPORTED_MSG,im_max,IMG_TOKS = _core.UNSUPPORTED,_core.IM_MAX,_core.IMG_TOKENS
 
@@ -286,7 +286,18 @@ def dlg2reply(sub):
             msgs += [Msg('assistant', [ToolUse(id=tr.id, name=tr.name, arguments=tr.arguments)]), Msg('tool', [tr])]
     return write_reply(msgs)
 
-def _nb(d): return get_ipynb(d) if isinstance(d, Dialog) else msgs2ipynb(list(d))
+def _nb(d): return d if isinstance(d, dict) else get_ipynb(d) if isinstance(d, Dialog) else msgs2ipynb(list(d))
+
+def export_dlg(d,
+    *, exportfilter:bool=False, # Keep only the messages `export_filter` selects?
+    weave:bool=False, # Code messages contribute only `render_text` over their outputs, as document prose?
+    language:str=None, # Kernel language for code parts (inferred from notebook metadata when None, else 'python')
+    frontmatter:bool=True, # Extract a leading raw/note YAML frontmatter cell?
+    att_data:bool=True, # Include base64 payloads in `cell['attachments']` (False keeps only MIME types)?
+):
+    "Project a dialog or notebook dict into `{frontmatter, language, cells}` structured typed parts"
+    opts = json.dumps(dict(language=language, exportfilter=exportfilter, weave=weave, frontmatter=frontmatter, att_data=att_data))
+    return json.loads(_core.export_nb(json.dumps(_nb(d)), opts))
 
 def msg2md(m,
     weave:bool=False, # Code messages contribute only `render_text` over their outputs, as document prose?
@@ -301,7 +312,7 @@ def dlg2md(d,
     *, language:str='python', # Kernel language for code fences
 ):
     "The dialog as one Markdown document"
-    return _core.dlg2md(json.dumps(_nb(d)), language, exportfilter, weave)
+    return _core.dlg2md(json.dumps(_nb(d)), language or '', exportfilter, weave)
 
 def msg2text(m, part='input'):
     "Input source or plain-text output for copying one message part"

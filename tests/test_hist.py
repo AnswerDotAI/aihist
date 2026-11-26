@@ -5,8 +5,8 @@ from threading import Thread
 from aidialog.dialog import Dialog, Message, Attachment, prompt_output, code_output, displayobj
 from aidialog.msg_parts import Msg, Text, ToolUse, ToolResult, hist2fmt
 from aihist import (build, dlg2hist, dlg2chat, chat2dlg, reply2dlg, dlg2reply, tool_call, hist_xml, to_parts, to_media, media_item, resize_img,
-    pdf_pages, output_parts, merge_media, vars_hist, is_nameerr, get_exprs, get_refs, references, cell_turn, _core, task_tags, warning_tag, msg2md, dlg2md,
-    msg2text, msgs2py)
+    pdf_pages, output_parts, merge_media, vars_hist, is_nameerr, get_exprs, get_refs, references, cell_turn, _core, task_tags, warning_tag,
+    export_dlg, msg2md, dlg2md, msg2text, msgs2py)
 
 png = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR4nGP4DwABAQEAsTj2FAAAAABJRU5ErkJggg==')
 images = dict(input_modalities=['text', 'image'])
@@ -155,3 +155,18 @@ def test_markdown_documents():
     assert dlg2md(d, weave=True).split('\n\n')[1] == '64'
     d.messages[2].pinned = True
     assert '::: prompt' not in dlg2md(d, exportfilter=True)
+    # `export_dlg` preserves cell identity, metadata, typed parts, and attachment maps.
+    fm = Message('---\ntitle: Demo\n---', msg_type='raw')
+    rich = Message('table()', output=[dict(output_type='display_data', metadata={}, data={'text/html': '<table>1</table>', 'text/plain': '1'})])
+    d2 = Dialog([fm, *d.messages, rich, Message('hidden', msg_type='note', skipped=True)], meta=dict(kernelspec=dict(language='julia')))
+    exp = export_dlg(d2)
+    assert exp['frontmatter'] == '---\ntitle: Demo\n---\n' and exp['language'] == 'julia'
+    assert [c['kind'] for c in exp['cells']] == ['note', 'code', 'prompt', 'code', 'code', 'note']
+    assert exp['cells'][0]['src'] == [dict(type='md', text='# Results ![plot](attachment:img1.png)')] and exp['cells'][0]['attachments']['img1.png']['mime'] == 'image/png'
+    assert export_dlg(d2, att_data=False)['cells'][0]['attachments'] == {'img1.png': {'mime': 'image/png'}}
+    assert exp['cells'][1]['src'] == [dict(type='code', lang='julia', text='8*8')] and exp['cells'][1]['out'] == [dict(type='text', text='64')]
+    assert [p['type'] for p in exp['cells'][2]['out']] == ['tool', 'md'] and exp['cells'][4]['out'] == [dict(type='html', html='<table>1</table>', text='1')]
+    assert exp['cells'][5]['meta'].get('skipped') is True and export_dlg(d2, exportfilter=True)['frontmatter'] == '---\ntitle: Demo\n---\n'
+    assert dlg2md(d2).startswith('---\ntitle: Demo\n---\n\n# Results ![plot](data:image/png;base64,') and '```python\n8*8' in dlg2md(d2)
+    assert export_dlg(dict(cells=[dict(id='a', cell_type='markdown', source='hi')]))['cells'][0] == dict(
+        id='a', kind='note', src=[dict(type='md', text='hi')], out=[], attachments={}, meta={})
