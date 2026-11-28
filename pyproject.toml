@@ -7,7 +7,7 @@ name = "aihist"
 dynamic = ["version"]
 description = "Turn notebook dialogs into LLM input, and chats into dialog text and back"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = {text = "Apache-2.0"}
 authors = [{name = "Jeremy Howard", email = "github@jhoward.fastmail.fm"}]
 classifiers = ["Programming Language :: Rust", "Programming Language :: Python :: Implementation :: CPython"]
@@ -22,6 +22,7 @@ Homepage = "https://github.com/AnswerDotAI/aihist"
 Repository = "https://github.com/AnswerDotAI/aihist"
 Issues = "https://github.com/AnswerDotAI/aihist/issues"
 
+Documentation = "https://AnswerDotAI.github.io/aihist/"
 [tool.fastship]
 branch = "main"
 
